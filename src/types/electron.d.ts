@@ -9,6 +9,7 @@ declare global {
             musicCommand: (command: string) => void;
             openExternal?: (url: string) => void;
             resize?: (params: { direction: string; deltaX: number; deltaY: number }) => void;
+            triggerRepaint?: () => void;
         };
     }
 }

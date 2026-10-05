@@ -6,6 +6,23 @@
 import type { AnimatedArtworkData, ArtworkTrackInfo } from './types';
 import { cleanCoreTitle } from './metadataMatcher';
 
+function mergeSignalWithTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    if (!signal) return timeoutSignal;
+    if (typeof AbortSignal.any === 'function') {
+        return AbortSignal.any([signal, timeoutSignal]);
+    }
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    if (signal.aborted) {
+        controller.abort();
+        return controller.signal;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    timeoutSignal.addEventListener('abort', onAbort, { once: true });
+    return controller.signal;
+}
+
 /**
  * Extracts official Apple Music motion HLS (.m3u8) streams from Apple Music album page
  */
@@ -19,7 +36,7 @@ async function extractMotionFromAlbumPage(
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
             },
-            signal: signal ? signal : AbortSignal.timeout(4500)
+            signal: mergeSignalWithTimeout(signal, 4500)
         });
         if (!pageRes.ok) return null;
 
@@ -56,7 +73,7 @@ async function fetchDirectAppleMusicMotion(
                 const cleanAlbum = track.album.replace(/\s*-\s*Single/i, '').replace(/\(.*?\)|\[.*?\]|\{.*?\}/g, '').trim();
                 const albumQ = `${cleanArtist} ${cleanAlbum}`;
                 const aRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(albumQ)}&entity=album&limit=3`, {
-                    signal: signal ? signal : AbortSignal.timeout(3000)
+                    signal: mergeSignalWithTimeout(signal, 3000)
                 });
                 if (aRes.ok) {
                     const aData = await aRes.json();
@@ -69,11 +86,13 @@ async function fetchDirectAppleMusicMotion(
             }
         }
 
+        if (signal?.aborted) return null;
+
         // 2. Search entity=song to find exact track match and its associated album URL
         try {
             const songQ = `${cleanArtist} ${cleanTitle}`;
             const sRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(songQ)}&entity=song&limit=5`, {
-                signal: signal ? signal : AbortSignal.timeout(3000)
+                signal: mergeSignalWithTimeout(signal, 3000)
             });
             if (sRes.ok) {
                 const sData = await sRes.json();
@@ -153,7 +172,7 @@ export const appleMusicArtworkProvider = {
 
             const url = `https://artwork.m8tec.top/api/v1/artwork/search?${params.toString()}`;
             const res = await fetch(url, {
-                signal: signal ? signal : AbortSignal.timeout(2500)
+                signal: mergeSignalWithTimeout(signal, 2500)
             });
 
             if (!res.ok) {

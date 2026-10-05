@@ -31,7 +31,8 @@
     pointer-events: auto !important;
     -webkit-app-region: no-drag !important;
     z-index: 101;
-    width: clamp(48px, 12vmin, 68px);
+    width: auto;
+    min-width: 24px;
     justify-content: flex-start;
 }
 

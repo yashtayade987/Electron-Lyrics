@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Header } from '../player/Header';
 import { WindowControls } from '../player/WindowControls';
 import { HudToast } from '../player/HudToast';
 import { ResizeHandles } from './ResizeHandles';
 import { LyricsContextMenu } from '../lyrics/LyricsContextMenu';
-import { AnimatedArtworkBackground } from '../animated/AnimatedArtworkBackground';
-import { AnimatedArtworkLyrics } from '../animated/AnimatedArtworkLyrics';
+import { AnimatedBackground } from '../animated/AnimatedBackground';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -72,54 +70,70 @@ export const Layout: React.FC<LayoutProps> = ({ children, isAnimatedArtworkActiv
             onContextMenu={handleContextMenu}
         >
             {/* Background Layer: Animated video when active, or dynamic ambient album art */}
-            <AnimatePresence mode="wait">
-                {isAnimated && videoSrc ? (
-                    <motion.div
-                        key={`video-${videoSrc}`}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                        style={{ position: 'absolute', inset: 0, zIndex: 1, overflow: 'hidden' }}
+            <div
+                className="background-layer-root"
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    width: '100%',
+                    height: '100%',
+                    zIndex: 1,
+                    overflow: 'hidden',
+                    pointerEvents: 'none'
+                }}
+            >
+                {/* Dynamic ambient album art for normal mode */}
+                {coverArt && (
+                    <div
+                        className="dynamic-bg"
+                        style={{
+                            backgroundImage: `url(${coverArt})`,
+                            opacity: (isAnimated && videoSrc) ? 0 : 1,
+                            transition: 'opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
+                        }}
+                    />
+                )}
+
+                {/* Animated video background with immediate mount & visibility */}
+                {isAnimated && videoSrc && (
+                    <div
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            width: '100%',
+                            height: '100%',
+                            zIndex: 2,
+                            overflow: 'hidden',
+                            pointerEvents: 'none'
+                        }}
                     >
-                        <AnimatedArtworkBackground
+                        <AnimatedBackground
                             videoUrl={videoSrc}
                             poster={coverArt}
                             isPlaying={isPlaying}
                             onError={handleVideoError}
                         />
-                    </motion.div>
-                ) : coverArt ? (
-                    <motion.div
-                        key={`art-${coverArt}`}
-                        initial={{ opacity: 0, scale: 1.05 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 1.05 }}
-                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                        className="dynamic-bg"
-                        style={{ backgroundImage: `url(${coverArt})` }}
-                    />
-                ) : null}
-            </AnimatePresence>
+                    </div>
+                )}
+            </div>
 
-            {/* Ambient vignette and specular sheen */}
-            <div className="ambient-overlay" aria-hidden="true" />
+            {/* Ambient vignette and specular sheen for static album art; hidden for pristine video clarity */}
+            {!isAnimated && <div className="ambient-overlay" aria-hidden="true" />}
 
             {/* macOS Titlebar Chrome (Restored to 40px Height) */}
-            <WindowControls />
+            <WindowControls isAnimatedArtworkActive={isAnimated} />
 
             {/* Functional Main Layer */}
             <div className={`main-content-layer ${isAnimated ? 'animated-layout' : ''}`}>
-                {/* When animated artwork is active, only show the current line above the song metadata and controls */}
-                {isAnimated ? (
-                    <div className="animated-current-line-container" role="region" aria-label="Current Lyric">
-                        <AnimatedArtworkLyrics />
-                    </div>
-                ) : (
-                    <main className="scrollable-content-section" role="region" aria-label="Lyrics Display">
-                        {children}
-                    </main>
-                )}
+                <main className="scrollable-content-section" role="region" aria-label="Lyrics Display">
+                    {children}
+                </main>
 
                 {/* Bottom Player Component (Song Metadata & Music Controls) */}
                 <div className="bottom-player-section">
@@ -132,9 +146,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, isAnimatedArtworkActiv
                 <LyricsContextMenu
                     x={contextMenu.x}
                     y={contextMenu.y}
-                    hasWordSync={Boolean(
-                        lyrics?.lines?.some((l) => (l.syllables && l.syllables.length > 0) || l.isSyllable)
-                    )}
+                    hasWordSync={lyrics?.syncType === 'SYLLABLE'}
                     isAnimatedArtworkActive={isAnimated}
                     onClose={() => setContextMenu(null)}
                 />

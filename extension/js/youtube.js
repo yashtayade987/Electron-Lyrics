@@ -188,7 +188,7 @@ socket.on('connect', () => {
 });
 
 // Periodic status poll
-setInterval(checkAndUpdate, 1000);
+setInterval(checkAndUpdate, 300);
 
 // Fast reaction using MutationObserver on the player bar
 const observer = new MutationObserver(() => {

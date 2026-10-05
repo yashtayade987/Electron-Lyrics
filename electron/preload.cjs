@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electron', {
     resize: (data) => ipcRenderer.send('window-resize', data),
     musicCommand: (command) => ipcRenderer.send('music-command', command),
     openExternal: (url) => ipcRenderer.send('open-external', url),
+    triggerRepaint: () => ipcRenderer.send('force-repaint'),
 });
 
 console.log('[Preload] window.electron bridge exposed successfully.');

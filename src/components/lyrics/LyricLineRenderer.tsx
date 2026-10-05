@@ -1,20 +1,20 @@
 import React, { forwardRef, useMemo } from 'react';
-import type { LyricLine, Word, Letter } from '../../utils/lyricsProvider';
+import type { LyricLine, Word } from '../../utils/lyricsProvider';
 
 interface LyricLineProps {
     line: LyricLine;
-    isRomanized: boolean;
     isActive?: boolean;
+    isPast?: boolean;
+    isRomanized?: boolean;
 }
 
 export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLineProps>(({
     line,
-    isRomanized,
-    isActive = false
+    isActive = false,
+    isPast = false,
+    isRomanized = false
 }, ref) => {
-
-    // Apple Music / Spicy Lyrics 3 dots for instrumental gaps
-    const isInstrumental = line.isInstrumental || line.words === '♪' || line.words.includes('Instrumental');
+    const isInstrumental = line.isInstrumental || line.words === '♪' || line.words?.includes('Instrumental');
 
     // Group syllables into semantic words using isPartOfWord (memoized to prevent array allocations)
     const wordGroups: Word[][] = useMemo(() => {
@@ -35,7 +35,7 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
     if (isInstrumental) {
         return (
             <div
-                className={`lyric-line instrumental ${isActive ? 'active-line' : ''}`}
+                className={`lyric-line instrumental ${isActive ? 'active-line' : ''} ${isPast ? 'passed-line' : ''}`}
                 ref={ref}
                 data-start={line.startTimeMs}
                 data-end={line.endTimeMs}
@@ -64,12 +64,25 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
         );
     }
 
+    const displayText = line.words || line.text || '';
+    const hasExistingParens = /^\s*\(.*?\)\s*$/.test(displayText);
+    const isBackgroundLine = Boolean(line.isBackground || hasExistingParens);
+
     const lineClasses = [
         'lyric-line',
         isActive ? 'active-line' : '',
+        isPast ? 'passed-line' : '',
         line.isOppositeAligned ? 'opposite-aligned' : '',
-        line.isBackground ? 'bg-line' : ''
+        isBackgroundLine ? 'bg-line' : ''
     ].filter(Boolean).join(' ');
+
+    const hasSyllableParens = Boolean(
+        line.syllables && line.syllables.length > 0 && (
+            line.syllables[0]?.word?.startsWith('(') ||
+            line.syllables[line.syllables.length - 1]?.word?.endsWith(')')
+        )
+    );
+    const shouldRenderParen = isBackgroundLine && !hasExistingParens && !hasSyllableParens;
 
     return (
         <div
@@ -79,35 +92,13 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
             data-end={line.endTimeMs}
         >
             <div className="words-container">
-                {line.isBackground && line.syllables && <span className="bg-paren">(</span>}
-                {line.syllables ? (
+                {shouldRenderParen && <span className="bg-paren">(</span>}
+                {line.syllables && line.syllables.length > 0 ? (
                     wordGroups.map((group, gIdx) => (
                         <span key={gIdx} className="word-group">
                             {group.map((s: Word, sIdx: number) => {
                                 const isLastInWord = sIdx === group.length - 1;
-                                const wordClass = `word${s.letters && s.letters.length > 0 ? ' letterGroup' : ''}${s.isPartOfWord ? ' part-of-word' : ''}${isLastInWord ? ' last-syllable-in-word' : ''}`;
-
-                                if (s.letters && s.letters.length > 0) {
-                                    return (
-                                        <span
-                                            key={sIdx}
-                                            className={wordClass}
-                                            data-start={s.startTimeMs}
-                                            data-end={s.endTimeMs}
-                                        >
-                                            {s.letters.map((l: Letter, lIdx: number) => (
-                                                <span
-                                                    key={lIdx}
-                                                    className={`letter${l.letter.trim().length === 0 ? ' space-letter' : ''}`}
-                                                    data-start={l.startTimeMs}
-                                                    data-end={l.endTimeMs}
-                                                >
-                                                    {l.letter}
-                                                </span>
-                                            ))}
-                                        </span>
-                                    );
-                                }
+                                const wordClass = `word${s.isPartOfWord ? ' part-of-word' : ''}${isLastInWord ? ' last-syllable-in-word' : ''}`;
 
                                 return (
                                     <span
@@ -124,19 +115,20 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
                     ))
                 ) : (
                     <span
-                        className="word"
+                        className="word line-text-fallback"
                         data-start={line.startTimeMs}
                         data-end={line.endTimeMs}
+                        style={{ whiteSpace: 'normal', display: 'inline', wordBreak: 'break-word', overflowWrap: 'break-word', overflow: 'visible' }}
                     >
-                        {line.words}
+                        {displayText}
                     </span>
                 )}
-                {line.isBackground && line.syllables && <span className="bg-paren">)</span>}
+                {shouldRenderParen && <span className="bg-paren">)</span>}
             </div>
 
-            {isRomanized && line.words !== "" && (
+            {isRomanized && displayText !== '' && (
                 <span className="romanized" style={{ opacity: 0.5, fontSize: '0.6em', display: 'block', marginTop: '4px' }}>
-                    {/* Romanized fallback placeholder */}
+                    {/* Romanized fallback */}
                 </span>
             )}
         </div>

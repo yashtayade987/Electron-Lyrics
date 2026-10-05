@@ -34,7 +34,6 @@ export class WindowsMediaService extends EventEmitter {
 
         const args = [
             '-NoProfile',
-            '-NonInteractive',
             '-ExecutionPolicy',
             'Bypass',
             '-File',
@@ -91,6 +90,12 @@ export class WindowsMediaService extends EventEmitter {
 
     handleStdout(chunk) {
         this.buffer += chunk;
+        if (this.buffer.length > 1024 * 1024) {
+            // Cap buffer at 1MB to prevent memory exhaustion from runaway stdout
+            this.buffer = '';
+            return;
+        }
+
         const lines = this.buffer.split('\n');
         this.buffer = lines.pop(); // Keep incomplete line in buffer
 
@@ -118,7 +123,12 @@ export class WindowsMediaService extends EventEmitter {
     }
 
     sendCommand(action, payload = {}) {
-        if (!this.isRunning || !this.process || !this.process.stdin.writable) {
+        if (!this.isRunning || !this.process) {
+            this.start();
+        }
+
+        if (!this.process || !this.process.stdin || !this.process.stdin.writable) {
+            console.warn('[WindowsMediaService] Cannot send command: stdin is not writable');
             return false;
         }
 
@@ -142,15 +152,21 @@ export class WindowsMediaService extends EventEmitter {
             this.isRunning = false;
             try {
                 this.process.stdin.end(); // triggers clean exit via EOF
-                setTimeout(() => {
-                    if (this.process) {
-                        this.process.kill();
-                        this.process = null;
-                    }
-                }, 1000);
-            } catch {
-                if (this.process) this.process.kill();
+                const proc = this.process;
                 this.process = null;
+                const killTimer = setTimeout(() => {
+                    try {
+                        if (proc && !proc.killed) {
+                            proc.kill('SIGKILL');
+                        }
+                    } catch {}
+                }, 1000);
+                if (killTimer.unref) killTimer.unref();
+            } catch {
+                if (this.process) {
+                    try { this.process.kill(); } catch {}
+                    this.process = null;
+                }
             }
         }
     }

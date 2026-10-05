@@ -1,6 +1,5 @@
 import React, { useLayoutEffect, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useEffectsStore } from '../../store/useEffectsStore';
 import { useAppStore } from '../../store/useAppStore';
 import { artworkResolver } from '../../utils/artwork/ArtworkResolver';
 import type { ArtworkTrackInfo } from '../../utils/artwork/types';
@@ -33,8 +32,9 @@ export const LyricsContextMenu: React.FC<LyricsContextMenuProps> = ({
     isAnimatedArtworkActive = false,
     onClose
 }) => {
-    const { lyricMode, setLyricMode } = useEffectsStore();
     const {
+        lyricMode,
+        setLyricMode,
         currentSong,
         artworkPreference,
         manualArtworkOverride,

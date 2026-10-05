@@ -61,9 +61,72 @@ interface AppState {
   // macOS Native UI States
   hudMessage: string | null;
   showHud: (msg: string) => void;
+
+  // Lyric sync & display mode
+  lyricMode: 'auto' | 'line' | 'word';
+  setLyricMode: (mode: 'auto' | 'line' | 'word') => void;
+  syncOffsetMs: number;
+  setSyncOffsetMs: (offset: number) => void;
+  adjustSyncOffsetMs: (delta: number) => number;
 }
 
 let hudTimeout: number | undefined;
+
+/**
+ * Normalizes and compares song metadata to detect if two updates represent the same track,
+ * handling variations in feature artists, clean/explicit tags, casing, and localized names.
+ */
+export function isSameSong(
+  prevTitle: string | null | undefined,
+  prevArtist: string | null | undefined,
+  nextTitle: string | null | undefined,
+  nextArtist: string | null | undefined
+): boolean {
+  if (!prevTitle || !nextTitle) return false;
+  if (prevTitle === 'No song playing' || nextTitle === 'No song playing') return false;
+
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/\(feat\..*?\)/gi, '')
+      .replace(/\[feat\..*?\]/gi, '')
+      .replace(/\(with.*?\)/gi, '')
+      .replace(/\[with.*?\]/gi, '')
+      .replace(/\(official.*?video.*?\)/gi, '')
+      .replace(/\[official.*?video.*?\]/gi, '')
+      .replace(/\(official.*?audio.*?\)/gi, '')
+      .replace(/\[official.*?audio.*?\]/gi, '')
+      .replace(/\(clean.*?ver.*?\)/gi, '')
+      .replace(/\[clean.*?ver.*?\]/gi, '')
+      .replace(/\(explicit.*?\)/gi, '')
+      .replace(/\[explicit.*?\]/gi, '')
+      .replace(/\(.*?\)|\[.*?\]/g, '')
+      .replace(/[^a-z0-9\u00C0-\u024F\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF\u3040-\u30FF\u4E00-\u9FFF]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const normPrevT = normalize(prevTitle);
+  const normNextT = normalize(nextTitle);
+
+  const titlesMatch = normPrevT === normNextT ||
+    (normPrevT.length >= 3 && normNextT.length >= 3 && (normPrevT.includes(normNextT) || normNextT.includes(normPrevT)));
+
+  if (!titlesMatch) return false;
+
+  if (prevArtist && nextArtist) {
+    const normPrevA = normalize(prevArtist);
+    const normNextA = normalize(nextArtist);
+    if (normPrevA === normNextA) return true;
+    if (normPrevA.includes(normNextA) || normNextA.includes(normPrevA)) return true;
+
+    const wordsA = normPrevA.split(' ').filter((w) => w.length > 2);
+    const wordsB = normNextA.split(' ').filter((w) => w.length > 2);
+    const commonWord = wordsA.some((w) => wordsB.includes(w));
+    if (commonWord) return true;
+  }
+
+  return titlesMatch;
+}
 
 export const useAppStore = create<AppState>((set) => ({
   currentSong: {
@@ -108,36 +171,72 @@ export const useAppStore = create<AppState>((set) => ({
 
   setSong: (song) =>
     set((state) => {
-      const prevKey = `${state.currentSong.title}::${state.currentSong.artist}`;
-      const nextKey = `${song.title ?? state.currentSong.title}::${song.artist ?? state.currentSong.artist}`;
-      const isNewTrack = Boolean(
-        (song.title && song.title !== state.currentSong.title) ||
-        (song.artist && song.artist !== state.currentSong.artist) ||
-        prevKey !== nextKey
+      const isSame = isSameSong(
+        state.currentSong.title,
+        state.currentSong.artist,
+        song.title,
+        song.artist
       );
 
-      // When a new track starts, wipe previous track ID and artwork so stale IDs/media never leak across songs
+      // Only mark as a genuinely new track if titles and artists do NOT match the current song
+      const isNewTrack = !isSame && Boolean(
+        song.title &&
+        song.title !== state.currentSong.title &&
+        state.currentSong.title !== 'No song playing'
+      );
+
+      // Preserve existing animated artwork and canvasUrl when updates arrive for the same playing track
+      const preservedAnimatedArtwork = isSame ? state.currentSong.animatedArtwork : {
+        available: false,
+        source: null,
+        videoUrl: null,
+        videoTallUrl: null,
+        previewUrl: null,
+        artworkId: null
+      };
+
+      const preservedAnimatedArtworkUrl = isSame ? state.currentSong.animatedArtworkUrl : null;
+      const preservedAnimatedArtworkTallUrl = isSame ? state.currentSong.animatedArtworkTallUrl : null;
+
+      const effectiveCanvasUrl = (song.canvasUrl && typeof song.canvasUrl === 'string' && song.canvasUrl.startsWith('http'))
+        ? song.canvasUrl
+        : (isSame ? state.currentSong.canvasUrl : null);
+
+      const nextArtwork = song.animatedArtwork ?? (
+        (isSame && state.currentSong.animatedArtwork?.available && state.currentSong.animatedArtwork?.videoUrl)
+          ? state.currentSong.animatedArtwork
+          : preservedAnimatedArtwork
+      );
+
+      const nextVideoUrl = song.animatedArtworkUrl ?? (
+        song.animatedArtwork ? song.animatedArtwork.videoUrl : preservedAnimatedArtworkUrl
+      );
+
+      const nextVideoTallUrl = song.animatedArtworkTallUrl ?? (
+        song.animatedArtwork ? (song.animatedArtwork.videoTallUrl || song.animatedArtwork.videoUrl) : preservedAnimatedArtworkTallUrl
+      );
+
       const updatedSong: SongDetails = {
         ...state.currentSong,
         ...song,
-        id: isNewTrack ? (song.id !== undefined ? song.id : null) : (song.id !== undefined ? song.id : state.currentSong.id),
-        canvasUrl: isNewTrack ? (song.canvasUrl || null) : (song.canvasUrl !== undefined ? song.canvasUrl : state.currentSong.canvasUrl),
-        videoId: isNewTrack ? song.videoId : (song.videoId !== undefined ? song.videoId : state.currentSong.videoId),
-        animatedArtwork: isNewTrack && !song.animatedArtwork ? {
-          available: false,
-          source: null,
-          videoUrl: null,
-          videoTallUrl: null,
-          previewUrl: null,
-          artworkId: null
-        } : (song.animatedArtwork ?? state.currentSong.animatedArtwork),
-        animatedArtworkUrl: isNewTrack && !song.animatedArtworkUrl ? null : (song.animatedArtworkUrl ?? state.currentSong.animatedArtworkUrl),
-        animatedArtworkTallUrl: isNewTrack && !song.animatedArtworkTallUrl ? null : (song.animatedArtworkTallUrl ?? state.currentSong.animatedArtworkTallUrl)
+        progress: isNewTrack
+          ? (song.progress !== undefined ? song.progress : 0)
+          : (song.progress !== undefined ? song.progress : state.currentSong.progress),
+        id: (song.id !== undefined && song.id !== null)
+          ? song.id
+          : (isSame ? state.currentSong.id : null),
+        canvasUrl: effectiveCanvasUrl,
+        videoId: (song.videoId !== undefined)
+          ? song.videoId
+          : (isSame ? state.currentSong.videoId : undefined),
+        animatedArtwork: nextArtwork,
+        animatedArtworkUrl: nextVideoUrl,
+        animatedArtworkTallUrl: nextVideoTallUrl
       };
 
       return {
         currentSong: updatedSong,
-        // Clear manual override when the song changes, returning to Automatic mode
+        // Clear manual override ONLY on a genuine track change, never on same-song metadata updates
         manualArtworkOverride: isNewTrack ? null : state.manualArtworkOverride
       };
     }),
@@ -212,6 +311,22 @@ export const useAppStore = create<AppState>((set) => ({
     hudTimeout = window.setTimeout(() => {
       set({ hudMessage: null });
     }, 1500);
+  },
+
+  lyricMode: (localStorage.getItem('lyric-engine-mode') as 'auto' | 'line' | 'word') || 'auto',
+  setLyricMode: (lyricMode) => {
+    localStorage.setItem('lyric-engine-mode', lyricMode);
+    set({ lyricMode });
+  },
+  syncOffsetMs: 600,
+  setSyncOffsetMs: (syncOffsetMs) => set({ syncOffsetMs }),
+  adjustSyncOffsetMs: (delta) => {
+    let newOffset = 600;
+    set((state) => {
+      newOffset = Math.max(-5000, Math.min(5000, state.syncOffsetMs + delta));
+      return { syncOffsetMs: newOffset };
+    });
+    return newOffset;
   }
 }));
 

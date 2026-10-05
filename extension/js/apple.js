@@ -322,4 +322,4 @@ setInterval(() => {
             sendProgressUpdate(data);
         }
     }
-}, 1000);
+}, 300);

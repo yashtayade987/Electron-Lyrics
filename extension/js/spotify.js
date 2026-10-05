@@ -11,7 +11,16 @@ let lastSongId = '';
 let isCurrentActiveTab = false;
 let authenticatedSpotifyToken = null;
 let fiberTrackData = null;
+const MAX_CANVAS_CACHE = 100;
 const canvasCache = new Map(); // trackId -> canvasUrl (string or null)
+
+function setCanvasCache(key, val) {
+    if (canvasCache.size >= MAX_CANVAS_CACHE) {
+        const oldestKey = canvasCache.keys().next().value;
+        if (oldestKey) canvasCache.delete(oldestKey);
+    }
+    canvasCache.set(key, val);
+}
 
 // Protobuf encoder for Spotify canvaz-cache request
 function encodeCanvasProtobuf(trackId) {
@@ -94,7 +103,7 @@ async function fetchSpotifyCanvas(trackId) {
             const canvasUrl = parseCanvasProtobuf(buf);
             console.log(`[LyricsBridge: Spotify] Canvas result for ${trackId}:`, canvasUrl ? 'FOUND' : 'NONE');
             if (canvasUrl) {
-                canvasCache.set(trackId, canvasUrl);
+                setCanvasCache(trackId, canvasUrl);
                 return canvasUrl;
             }
         } else if (res.status === 401) {
@@ -113,13 +122,13 @@ async function fetchSpotifyCanvas(trackId) {
             const canvasUrl = json?.data?.canvasesList?.[0]?.canvasUrl;
             if (canvasUrl) {
                 console.log(`[LyricsBridge: Spotify] Canvas obtained via local bridge server for ${trackId}:`, canvasUrl);
-                canvasCache.set(trackId, canvasUrl);
+                setCanvasCache(trackId, canvasUrl);
                 return canvasUrl;
             }
         }
     } catch {}
 
-    canvasCache.set(trackId, null);
+    setCanvasCache(trackId, null);
     return null;
 }
 
@@ -516,7 +525,7 @@ setInterval(() => {
             sendProgressUpdate(data);
         }
     }
-}, 1000);
+}, 300);
 
 // Fast reaction using MutationObserver on the player bar
 const observer = new MutationObserver(() => {

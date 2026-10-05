@@ -38,9 +38,34 @@ const AppleMusicLogo = ({ size = 20 }: { size?: number }) => (
     </svg>
 );
 
-export const WindowControls = () => {
+interface WindowControlsProps {
+    isAnimatedArtworkActive?: boolean;
+}
+
+export const WindowControls: React.FC<WindowControlsProps> = ({ isAnimatedArtworkActive }) => {
     const [isPinned, setIsPinned] = useState(true);
-    const { theme, setTheme, isConnected, showHud, currentSong } = useAppStore();
+    const { theme, setTheme, isConnected, showHud, currentSong, artworkPreference, manualArtworkOverride } = useAppStore();
+
+    const hasAnimatedArtwork = Boolean(
+        currentSong.animatedArtwork?.available && currentSong.animatedArtwork?.videoUrl
+    );
+    const currentTrackKey = `${currentSong.title}::${currentSong.artist}`;
+    const override = manualArtworkOverride?.trackKey === currentTrackKey
+        ? manualArtworkOverride.override
+        : null;
+
+    let computedAnimated = false;
+    if (artworkPreference === 'always_normal') {
+        computedAnimated = false;
+    } else if (override === 'normal') {
+        computedAnimated = false;
+    } else if (override === 'animated') {
+        computedAnimated = hasAnimatedArtwork;
+    } else {
+        computedAnimated = hasAnimatedArtwork;
+    }
+
+    const isAnimated = isAnimatedArtworkActive !== undefined ? isAnimatedArtworkActive : computedAnimated;
 
     const handleClose = (e: React.MouseEvent | React.PointerEvent) => {
         e.preventDefault();
@@ -151,15 +176,17 @@ export const WindowControls = () => {
                     {!isConnected && <span className="service-offline-badge" title="Offline" />}
                 </button>
 
-                <button
-                    className="titlebar-icon-btn theme-btn"
-                    onClick={handleThemeToggle}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    title={themeTitle}
-                    aria-label={themeTitle}
-                >
-                    <ThemeIcon size={16} />
-                </button>
+                {!isAnimated && (
+                    <button
+                        className="titlebar-icon-btn theme-btn"
+                        onClick={handleThemeToggle}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        title={themeTitle}
+                        aria-label={themeTitle}
+                    >
+                        <ThemeIcon size={16} />
+                    </button>
+                )}
             </div>
 
             {/* Draggable Titlebar Region in Middle */}
