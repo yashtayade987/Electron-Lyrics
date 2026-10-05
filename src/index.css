@@ -1,0 +1,1719 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+/* ==========================================================================
+   Apple Human Interface Guidelines (HIG) Design System
+   Desktop / macOS & Electron Audio Experience
+   ========================================================================== */
+
+:root {
+  /* Core Apple System Font Stack (SF Pro with Inter fallback) */
+  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", sans-serif;
+
+  /* Semantic Typography & Vibrancy (Dark / Dynamic Default) */
+  --label-primary: #ffffff;
+  --label-secondary: rgba(255, 255, 255, 0.72);
+  --label-tertiary: rgba(255, 255, 255, 0.48);
+  --label-quaternary: rgba(255, 255, 255, 0.28);
+
+  /* Legacy token mapping */
+  --text-primary: var(--label-primary);
+  --text-secondary: var(--label-secondary);
+  --icon-color: var(--label-secondary);
+  --icon-hover: var(--label-primary);
+
+  /* Apple Music Signature Accent */
+  --accent-color: #fc3c44;
+  --accent-hover: #ff525a;
+  --accent-rgb: 252, 60, 68;
+
+  /* Materials & Liquid Glass */
+  --bg-color: #0c0c0e;
+  --glass-panel-bg: rgba(20, 20, 24, 0.65);
+  --glass-header-bg: rgba(18, 18, 22, 0.58);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-specular: rgba(255, 255, 255, 0.22);
+  --glass-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.65);
+
+  /* Control Fills */
+  --control-bg: rgba(255, 255, 255, 0.1);
+  --control-hover: rgba(255, 255, 255, 0.18);
+  --control-active: rgba(255, 255, 255, 0.26);
+
+  /* Lyrics Presentation */
+  --lyric-inactive: rgba(255, 255, 255, 0.32);
+  --lyric-passed: rgba(255, 255, 255, 0.6);
+  --lyric-active: #ffffff;
+  --lyric-glow: rgba(255, 255, 255, 0.25);
+  --placeholder-bg: rgba(255, 255, 255, 0.08);
+  --shadow-color: rgba(0, 0, 0, 0.4);
+
+  /* Apple Fluid Spring Timing */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- THEME: DARK --- */
+body.theme-dark {
+  --bg-color: #0a0a0c;
+  --glass-panel-bg: #0e0e11;
+  --glass-header-bg: rgba(14, 14, 17, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+body.theme-dark .dynamic-bg {
+  display: none !important;
+}
+
+body.theme-dark .ambient-overlay {
+  display: none !important;
+}
+
+/* --- THEME: LIGHT --- */
+body.theme-light {
+  --label-primary: #1d1d1f;
+  --label-secondary: rgba(0, 0, 0, 0.68);
+  --label-tertiary: rgba(0, 0, 0, 0.45);
+  --label-quaternary: rgba(0, 0, 0, 0.25);
+
+  --text-primary: var(--label-primary);
+  --text-secondary: var(--label-secondary);
+  --icon-color: var(--label-secondary);
+  --icon-hover: var(--label-primary);
+
+  --bg-color: #f5f5f7;
+  --glass-panel-bg: rgba(255, 255, 255, 0.82);
+  --glass-header-bg: rgba(250, 250, 252, 0.8);
+  --glass-border: rgba(0, 0, 0, 0.09);
+  --glass-specular: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.18);
+
+  --control-bg: rgba(0, 0, 0, 0.05);
+  --control-hover: rgba(0, 0, 0, 0.09);
+  --control-active: rgba(0, 0, 0, 0.15);
+
+  --lyric-inactive: rgba(0, 0, 0, 0.32);
+  --lyric-passed: rgba(0, 0, 0, 0.55);
+  --lyric-active: #000000;
+  --lyric-glow: rgba(0, 0, 0, 0.1);
+  --placeholder-bg: rgba(0, 0, 0, 0.06);
+  --shadow-color: rgba(0, 0, 0, 0.12);
+}
+
+body.theme-light .dynamic-bg {
+  display: none !important;
+}
+
+body.theme-light .ambient-overlay {
+  display: none !important;
+}
+
+body.theme-light .lyric-line {
+  opacity: 0.42;
+}
+
+body.theme-light .lyric-line:not(.active-line):hover {
+  opacity: 0.78;
+}
+
+/* ==========================================================================
+   Base & Resets
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+html, body, #root {
+  background: transparent !important;
+  color: var(--label-primary);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+}
+
+/* ==========================================================================
+   Window Anatomy (macOS Liquid Glass Squircle Container)
+   ========================================================================== */
+
+.app-container.mini-player {
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-color);
+  border-radius: 28px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-specular),
+    inset 0 0 0 0.5px var(--glass-border);
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+/* Dynamic Ambient Blurred Background Layer (Content Layer) */
+.dynamic-bg {
+  position: absolute;
+  top: -15%;
+  left: -15%;
+  width: 130%;
+  height: 130%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(52px) saturate(200%) brightness(0.65);
+  opacity: 1;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.dynamic-bg-video {
+  overflow: hidden;
+}
+
+.dynamic-bg-video .animated-artwork-container {
+  width: 100%;
+  height: 100%;
+  transform: scale(1.15);
+}
+
+.album-art-container .animated-artwork-container {
+  border-radius: inherit;
+}
+
+/* Ambient Dimming & Specular Sheen (Materials Spec 35% dimming) */
+.ambient-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.05) 0%, transparent 60%),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+/* ==========================================================================
+   Main Content Layer & Functional Liquid Glass Header
+   ========================================================================== */
+
+.main-content-layer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  overflow: hidden;
+  z-index: 10;
+  position: relative;
+}
+
+/* Bottom Player Section (Song metadata & playback controls docked at bottom, matching animated player) */
+.bottom-player-section,
+.fixed-header-section {
+  flex-shrink: 0;
+  z-index: 20;
+  position: relative;
+  padding: 8px 20px 18px 20px;
+  width: 100%;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border-bottom: none;
+  border-top: none;
+  box-shadow: none;
+}
+
+.bottom-player-section .player-header,
+.fixed-header-section .player-header {
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
+.player-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 16px;
+  position: relative;
+}
+
+.header-main-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+/* Apple Music Album Artwork Squircle */
+.album-art-container {
+  width: clamp(48px, 12vmin, 68px);
+  height: clamp(48px, 12vmin, 68px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 8px 20px -2px var(--shadow-color);
+  flex-shrink: 0;
+  position: relative;
+  background: var(--placeholder-bg);
+  transition: transform 0.3s var(--ease-spring);
+}
+
+.album-art-container:hover {
+  transform: scale(1.03);
+}
+
+.album-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.album-placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--placeholder-bg);
+}
+
+/* Typography Hierarchy (Apple SF Pro Display) */
+.song-meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+.song-title-container {
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  mask-image: linear-gradient(to right, black 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 88%, transparent 100%);
+}
+
+.explicit-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+  margin-left: 6px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+body.theme-light .explicit-tag {
+  color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.song-title {
+  display: flex;
+  white-space: nowrap;
+  font-size: clamp(1.05rem, 3.8vmin, 1.45rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--label-primary);
+  line-height: 1.25;
+  margin-bottom: 2px;
+  gap: 2.5em;
+}
+
+.song-title-text {
+  display: inline-block;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.song-title.scrolling {
+  animation: marquee-scroll 14s linear infinite;
+  width: max-content;
+}
+
+.song-title-copy {
+  flex-shrink: 0;
+}
+
+@keyframes marquee-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-50% - 1.25em));
+  }
+}
+
+.song-artist {
+  font-size: clamp(0.78rem, 2.4vmin, 0.92rem);
+  color: var(--label-secondary);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ==========================================================================
+   Playback Controls (Apple Music HIG Style - Exactly in place of Star and 3 dots)
+   ========================================================================== */
+
+.header-controls-column {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag !important;
+}
+
+.apple-music-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(8px);
+  background: transparent;
+  padding: 0;
+  border: none;
+  -webkit-app-region: no-drag !important;
+}
+
+.apple-media-btn {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  cursor: pointer !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 50%;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease, filter 0.15s ease;
+  outline: none;
+  opacity: 0.9;
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
+.apple-media-btn:hover {
+  opacity: 1;
+  transform: scale(1.12);
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.45));
+}
+
+body.theme-light .apple-media-btn {
+  color: #1d1d1f;
+}
+
+body.theme-light .apple-media-btn:hover {
+  filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.3));
+}
+
+.apple-media-btn:active {
+  transform: scale(0.9);
+}
+
+.apple-media-btn.play-pause-btn {
+  opacity: 1;
+}
+
+.apple-media-btn:focus-visible {
+  outline: 2px solid #0071e3;
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Lyrics Content Section & Typography
+   ========================================================================== */
+
+.scrollable-content-section {
+  flex: 1;
+  overflow: hidden;
+  padding: 38px clamp(16px, 5vmin, 36px) 6px clamp(16px, 5vmin, 36px);
+  /* Refined Apple Scroll-Edge Fade Effect */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 1) 40px,
+    rgba(0, 0, 0, 1) calc(100% - 24px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 1) 40px,
+    rgba(0, 0, 0, 1) calc(100% - 24px),
+    transparent 100%
+  );
+  position: relative;
+  z-index: 10;
+}
+
+.lyrics-container {
+  height: 100%;
+  overflow-y: auto;
+  padding: 36px 0;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  transform: translateZ(0);
+  will-change: scroll-position;
+  contain: layout;
+}
+
+.lyrics-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* Lyric Lines Typography & Spatial Depth (Spicetify Spicy Lyrics & Apple Music) */
+.lyric-line {
+  font-size: clamp(1.25rem, 5.8vmin, 3.4rem);
+  font-weight: 800; /* Apple Music Signature Bold Typography */
+  letter-spacing: -0.025em;
+  margin-bottom: clamp(1.2rem, 4vh, 2.6rem);
+  color: var(--label-primary);
+  line-height: 1.34;
+  text-align: left;
+  transform-origin: left center;
+  position: relative;
+  cursor: pointer;
+  contain: layout style;
+
+  /* Inactive baseline with optical depth-of-field */
+  opacity: 0.42;
+  transform: scale(0.95);
+  filter: blur(var(--dynamic-blur, 1.2px));
+  transition:
+    opacity 350ms var(--ease-spring),
+    transform 350ms var(--ease-spring),
+    filter 350ms var(--ease-spring);
+}
+
+/* Spicetify Spicy Lyrics interactive glassmorphic line hover pill */
+.lyric-line::before {
+  content: "";
+  position: absolute;
+  inset: -8px -18px;
+  background-color: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 16px;
+  opacity: 0;
+  transform: scale(0.96);
+  transition:
+    opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  z-index: -1;
+}
+
+body.theme-light .lyric-line::before {
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.lyric-line:hover::before {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Hover over inactive lines (Apple Music / Spicy Lyrics Desktop convention) */
+.lyric-line:not(.active-line):hover {
+  opacity: 0.82;
+  transform: scale(0.98) translateX(3px);
+  filter: blur(0px) !important;
+}
+
+/* Active Line (Clear, Prominent, Scaled, Luminous Bloom) */
+.lyric-line.active-line {
+  opacity: 1;
+  font-weight: 800;
+  transform: scale(1.04);
+  filter: blur(0px) !important;
+  text-shadow: 0 0 24px var(--lyric-glow);
+  will-change: transform, opacity;
+}
+
+/* Background Vocals (.bg-line) from Spicy Lyrics API */
+.lyric-line.bg-line {
+  font-size: clamp(1.05rem, 4.6vmin, 2.5rem);
+  font-weight: 700;
+  font-style: italic;
+  opacity: 0.65;
+  margin-top: -0.4em;
+  margin-bottom: clamp(1rem, 3.2vh, 2.2rem);
+  color: var(--label-secondary);
+}
+
+.lyric-line.bg-line.active-line {
+  opacity: 1;
+  transform: scale(1.02);
+  color: var(--label-primary);
+}
+
+.lyric-line.bg-line .bg-paren {
+  display: inline-block;
+  opacity: 0.7;
+  font-weight: 700;
+  margin: 0 0.12em;
+  color: var(--label-secondary);
+  -webkit-text-fill-color: var(--label-secondary);
+}
+
+/* Opposite-aligned duet vocals (Apple Music & Spicy Lyrics Duet Mode) */
+.lyric-line.opposite-aligned {
+  align-self: flex-end;
+  text-align: right;
+  transform-origin: right center;
+  width: 100%;
+}
+
+.lyric-line.opposite-aligned .words-container {
+  justify-content: flex-end;
+}
+
+.lyric-line.opposite-aligned .word-group {
+  margin-right: 0;
+  margin-left: 0.32em;
+}
+
+.lyric-line.opposite-aligned .word-group:first-child {
+  margin-left: 0;
+}
+
+/* Instrumental Breaks (Spicetify Spicy Lyrics 3 Animated Dots) */
+.lyric-line.instrumental {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  min-height: 44px;
+  height: clamp(2rem, 5.5vmin, 3.6rem);
+  margin-bottom: clamp(1.2rem, 3.8vh, 2.5rem);
+  opacity: 0.55;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  filter: blur(0px) !important;
+}
+
+.lyric-line.instrumental.active-line {
+  opacity: 1;
+  transform: scale(1.06);
+}
+
+.instrumental-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 0;
+}
+
+.instrumental-dot {
+  display: inline-block;
+  width: clamp(10px, 1.8vmin, 14px);
+  height: clamp(10px, 1.8vmin, 14px);
+  background-color: var(--label-primary);
+  border-radius: 50%;
+  opacity: 0.35;
+  transform: scale(0.85);
+  transition:
+    opacity 0.25s ease,
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.3s ease,
+    background-color 0.25s ease;
+}
+
+.instrumental-dot.dot-active {
+  opacity: 1;
+  transform: scale(1.35);
+  background-color: #ffffff;
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.95), 0 0 28px rgba(255, 255, 255, 0.55);
+}
+
+body.theme-light .instrumental-dot.dot-active {
+  background-color: #000000;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.35);
+}
+
+.instrumental-dot.dot-passed {
+  opacity: 0.85;
+  transform: scale(1);
+  box-shadow: none;
+}
+
+/* Word-by-Word Karaoke Mode (Spicetify Spicy Lyrics Architecture) */
+.words-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-start;
+  row-gap: 0.15em;
+}
+
+.word-group {
+  display: inline-flex;
+  white-space: nowrap;
+  align-items: baseline;
+  margin-right: 0.32em;
+}
+
+.word-group:last-child {
+  margin-right: 0;
+}
+
+.word {
+  display: inline-block;
+  position: relative;
+  transition: opacity 250ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0.5;
+  font-weight: 800;
+}
+
+/* Syllables that join the next syllable within the same word have no gap */
+.word.part-of-word {
+  margin-right: 0 !important;
+}
+
+/* ==========================================================================
+   Line-by-Line Mode: ALL words, syllables, and letters have 100% uniform color
+   ========================================================================== */
+.lyrics-container.line-mode-only .lyric-line,
+.animated-single-line-container.line-mode-only .lyric-line {
+  font-weight: 800;
+}
+
+/* In line-by-line mode, every single word, group, and letter has identical inline behavior and color */
+.lyrics-container.line-mode-only .word,
+.lyrics-container.line-mode-only .word.letterGroup,
+.lyrics-container.line-mode-only .letter,
+.animated-single-line-container.line-mode-only .word,
+.animated-single-line-container.line-mode-only .word.letterGroup,
+.animated-single-line-container.line-mode-only .letter {
+  display: inline !important;
+  font-weight: inherit !important;
+  opacity: 1 !important;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+  background: none !important;
+  -webkit-background-clip: unset !important;
+  background-clip: unset !important;
+  text-shadow: inherit !important;
+  transform: none !important;
+}
+
+/* Active line in line-by-line mode: brilliant, luminous, 100% uniform across every syllable and word */
+.lyrics-container.line-mode-only .lyric-line.active-line,
+.animated-single-line-container.line-mode-only .lyric-line.active-line {
+  color: var(--label-primary) !important;
+  text-shadow:
+    0 0 24px var(--lyric-glow),
+    0 2px 14px rgba(0, 0, 0, 0.85);
+}
+
+.lyrics-container.line-mode-only .lyric-line.active-line .word,
+.lyrics-container.line-mode-only .lyric-line.active-line .word.letterGroup,
+.lyrics-container.line-mode-only .lyric-line.active-line .letter,
+.animated-single-line-container.line-mode-only .lyric-line.active-line .word,
+.animated-single-line-container.line-mode-only .lyric-line.active-line .word.letterGroup,
+.animated-single-line-container.line-mode-only .lyric-line.active-line .letter {
+  opacity: 1 !important;
+  color: var(--label-primary) !important;
+  -webkit-text-fill-color: var(--label-primary) !important;
+  text-shadow: inherit !important;
+}
+
+body.theme-light .lyrics-container.line-mode-only .lyric-line.active-line .word,
+body.theme-light .lyrics-container.line-mode-only .lyric-line.active-line .word.letterGroup,
+body.theme-light .lyrics-container.line-mode-only .lyric-line.active-line .letter {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+}
+
+/* Inactive lines in line-by-line mode: all words and letters share the line's natural depth-of-field */
+.lyrics-container.line-mode-only .lyric-line:not(.active-line) .word,
+.lyrics-container.line-mode-only .lyric-line:not(.active-line) .word.letterGroup,
+.lyrics-container.line-mode-only .lyric-line:not(.active-line) .letter,
+.animated-single-line-container.line-mode-only .lyric-line:not(.active-line) .word,
+.animated-single-line-container.line-mode-only .lyric-line:not(.active-line) .word.letterGroup,
+.animated-single-line-container.line-mode-only .lyric-line:not(.active-line) .letter {
+  opacity: 1 !important;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: none !important;
+}
+
+/* Spicetify Spicy Lyrics Word-by-Word Karaoke Wash & Visual Effects */
+.lyrics-container.word-mode .lyric-line .word {
+  cursor: pointer;
+  font-weight: 800;
+  position: relative;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  --gradient-position: -22%;
+  --gradient-color: 255;
+  --gradient-alpha: 0.98;
+  --gradient-alpha-end: 0.38;
+  --gradient-offset: 22%;
+
+  /* High-fidelity multi-stop liquid gradient wash for seamless vocal flow */
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position),
+    rgba(255, 255, 255, calc(var(--gradient-alpha) * 0.92)) calc(var(--gradient-position) + 5%),
+    rgba(255, 255, 255, calc(var(--gradient-alpha) * 0.62)) calc(var(--gradient-position) + 13%),
+    rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + var(--gradient-offset))
+  );
+  transition:
+    transform 280ms cubic-bezier(0.2, 0, 0, 1),
+    text-shadow 320ms ease;
+  opacity: 1;
+}
+
+/* Light mode gradient wash tokens */
+body.theme-light .lyrics-container.word-mode .lyric-line .word {
+  --gradient-alpha: 0.98;
+  --gradient-alpha-end: 0.32;
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, var(--gradient-alpha)) var(--gradient-position),
+    rgba(0, 0, 0, calc(var(--gradient-alpha) * 0.92)) calc(var(--gradient-position) + 5%),
+    rgba(0, 0, 0, calc(var(--gradient-alpha) * 0.62)) calc(var(--gradient-position) + 13%),
+    rgba(0, 0, 0, var(--gradient-alpha-end)) calc(var(--gradient-position) + var(--gradient-offset))
+  );
+}
+
+/* Background vocal line modifier */
+.lyrics-container.word-mode .lyric-line.bg-line .word {
+  --gradient-alpha: 0.88;
+  --gradient-alpha-end: 0.35;
+}
+
+/* Syllable Active State (Singing: Gentle grounded vocal lift without premature text-shadow bleed) */
+.lyrics-container.word-mode .lyric-line.active-line .word.active-word {
+  transform: scale(1.02);
+  will-change: transform;
+  text-shadow: none;
+  z-index: 2;
+}
+
+body.theme-light .lyrics-container.word-mode .lyric-line.active-line .word.active-word {
+  transform: scale(1.02);
+  will-change: transform;
+  text-shadow: none;
+}
+
+/* Syllable Passed State (Sung: Smoothly settled, zero glow) */
+.lyrics-container.word-mode .lyric-line.active-line .word.passed-word {
+  transform: scale(1);
+  text-shadow: none;
+}
+
+.lyrics-container.word-mode .lyric-line.passed-line .word {
+  --gradient-position: 100%;
+  --gradient-alpha: 0.7;
+  --gradient-alpha-end: 0.7;
+}
+
+body.theme-light .lyrics-container.word-mode .lyric-line.passed-line .word {
+  --gradient-position: 100%;
+  --gradient-alpha: 0.65;
+  --gradient-alpha-end: 0.65;
+}
+
+/* ==========================================================================
+   Letter-level Karaoke Syncing (Spicy Lyrics API sustained syllables)
+   Crucial fix: Prevent word transparent clip mask from hiding letter text
+   ========================================================================== */
+.lyrics-container.word-mode .lyric-line .word.letterGroup {
+  display: inline-flex !important;
+  -webkit-background-clip: unset !important;
+  background-clip: unset !important;
+  -webkit-text-fill-color: initial !important;
+  background-image: none !important;
+  opacity: 1 !important;
+}
+
+.lyrics-container.word-mode .letter {
+  display: inline-block;
+  font-weight: 800 !important;
+  position: relative;
+  color: var(--label-primary);
+  -webkit-text-fill-color: var(--label-primary) !important;
+  opacity: 0.38;
+  transition:
+    opacity 160ms ease,
+    transform 220ms cubic-bezier(0.2, 0, 0, 1),
+    text-shadow 240ms ease,
+    color 160ms ease;
+}
+
+.lyrics-container.word-mode .letter.space-letter {
+  white-space: pre;
+  min-width: 0.32ch;
+}
+
+/* Inactive line letters in word mode */
+.lyrics-container.word-mode .lyric-line:not(.active-line) .letter {
+  opacity: 0.38 !important;
+  color: var(--label-primary) !important;
+  -webkit-text-fill-color: var(--label-primary) !important;
+  text-shadow: none;
+}
+
+.lyrics-container.word-mode .lyric-line:not(.active-line):hover .letter {
+  opacity: 0.8 !important;
+}
+
+/* Active letter (currently sung letter within held syllable) in word mode */
+.lyrics-container.word-mode .lyric-line.active-line .letter.active-letter {
+  opacity: 1 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transform: scale(1.04);
+  will-change: transform;
+  text-shadow:
+    0 0 10px rgba(255, 255, 255, 0.9),
+    0 0 20px rgba(255, 255, 255, 0.5);
+  z-index: 4;
+}
+
+body.theme-light .lyrics-container.word-mode .lyric-line.active-line .letter.active-letter {
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  text-shadow:
+    0 0 8px rgba(0, 0, 0, 0.25),
+    0 0 16px rgba(0, 0, 0, 0.12);
+}
+
+/* Passed letter (already sung letter within held syllable) in word mode */
+.lyrics-container.word-mode .lyric-line.active-line .letter.passed-letter {
+  opacity: 0.95 !important;
+  color: var(--label-primary) !important;
+  -webkit-text-fill-color: var(--label-primary) !important;
+  transform: scale(1);
+  text-shadow: none;
+}
+
+/* Passed line letters in word mode */
+.lyrics-container.word-mode .lyric-line.passed-line .letter {
+  opacity: 0.65 !important;
+  color: var(--label-primary) !important;
+  -webkit-text-fill-color: var(--label-primary) !important;
+  text-shadow: none;
+}
+
+/* ==========================================================================
+   Apple Music Style Lyrics Attribution & Credits Footer
+   ========================================================================== */
+
+.lyrics-attribution-footer {
+  margin-top: clamp(2rem, 5vh, 3.5rem);
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
+  max-width: 650px;
+  font-family: var(--font-family);
+  user-select: text;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0.82;
+  transition: opacity 0.25s ease;
+}
+
+.lyrics-attribution-footer:hover {
+  opacity: 1;
+}
+
+body.theme-light .lyrics-attribution-footer {
+  border-top-color: rgba(0, 0, 0, 0.09);
+}
+
+.lyrics-songwriters {
+  font-size: clamp(0.74rem, 1.4vmin, 0.85rem);
+  color: var(--label-tertiary);
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+
+.lyrics-songwriters .attribution-label {
+  font-weight: 600;
+  color: var(--label-secondary);
+}
+
+.lyrics-songwriters .attribution-value {
+  color: var(--label-tertiary);
+}
+
+.lyrics-provider-attribution {
+  font-size: clamp(0.7rem, 1.3vmin, 0.8rem);
+  color: var(--label-quaternary);
+  line-height: 1.45;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.lyrics-provider-attribution .provider-name {
+  color: var(--label-tertiary);
+  font-weight: 500;
+}
+
+.lyrics-provider-attribution .attribution-sep {
+  opacity: 0.45;
+}
+
+.lyrics-provider-attribution .contributor-link {
+  color: var(--label-secondary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(255, 255, 255, 0.25);
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+  cursor: pointer;
+}
+
+.lyrics-provider-attribution .contributor-link:hover {
+  color: var(--label-primary);
+  text-decoration-color: var(--accent-color);
+}
+
+body.theme-light .lyrics-provider-attribution .contributor-link {
+  text-decoration-color: rgba(0, 0, 0, 0.25);
+}
+
+body.theme-light .lyrics-provider-attribution .contributor-link:hover {
+  color: #000;
+  text-decoration-color: var(--accent-color);
+}
+
+/* ==========================================================================
+   Apple Context Menu Popover
+   ========================================================================== */
+
+.apple-context-menu {
+  position: fixed;
+  opacity: 0;
+  transform: scale(0.96);
+  z-index: 99999;
+  background: rgba(30, 30, 36, 0.82);
+  backdrop-filter: blur(32px) saturate(1.8);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 6px;
+  min-width: 220px;
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 20px 48px rgba(0, 0, 0, 0.5);
+  font-family: var(--font-family);
+  transition: opacity 0.15s ease, transform 0.15s var(--ease-spring);
+  -webkit-app-region: no-drag;
+}
+
+body.theme-light .apple-context-menu {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #1d1d1f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 16px 36px rgba(0, 0, 0, 0.15);
+}
+
+.context-menu-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--label-tertiary);
+  padding: 6px 10px 4px 10px;
+}
+
+.context-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.12s ease;
+  text-align: left;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+body.theme-light .context-menu-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.context-menu-item.selected {
+  font-weight: 600;
+}
+
+.menu-item-icon {
+  color: var(--label-secondary);
+  flex-shrink: 0;
+}
+
+.menu-item-label {
+  flex: 1;
+}
+
+.menu-item-check {
+  color: var(--accent-color);
+  flex-shrink: 0;
+}
+
+.artwork-source-container {
+  display: flex;
+  gap: 6px;
+  padding: 3px 10px 6px 30px;
+}
+
+.source-chip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 6px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--label-secondary, rgba(255, 255, 255, 0.65));
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+}
+
+.source-chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.source-chip.selected {
+  font-weight: 600;
+}
+
+body.theme-light .source-chip {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.65);
+}
+
+body.theme-light .source-chip:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #1d1d1f;
+}
+
+/* ==========================================================================
+   Apple Empty & Loading States
+   ========================================================================== */
+
+.apple-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 2rem;
+  color: var(--label-secondary);
+  animation: apple-fade-in 0.4s var(--ease-spring);
+}
+
+@keyframes apple-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.empty-state-symbol {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--control-bg);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  color: var(--label-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.empty-state-symbol.pulse {
+  animation: apple-symbol-pulse 2s ease-in-out infinite;
+}
+
+@keyframes apple-symbol-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+.empty-state-title {
+  font-size: clamp(1.1rem, 3vmin, 1.4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--label-primary);
+  margin-bottom: 6px;
+}
+
+.empty-state-subtitle {
+  font-size: clamp(0.85rem, 2vmin, 0.95rem);
+  color: var(--label-secondary);
+  line-height: 1.45;
+  max-width: 320px;
+}
+
+/* ==========================================================================
+   Resize Handles
+   ========================================================================== */
+
+.resize-handle {
+  position: fixed;
+  z-index: 9999;
+  background: transparent;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+
+.resize-handle.resize-left {
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.resize-handle.resize-right {
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.resize-handle.resize-bottom {
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.resize-handle.resize-bottom-right {
+  bottom: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+}
+
+.resize-handle.resize-bottom-left {
+  bottom: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nesw-resize;
+}
+
+/* ==========================================================================
+   Accessibility & System Preference Adaptations (HIG Lens 1)
+   ========================================================================== */
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .song-title.scrolling {
+    animation: none !important;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+
+  .instrumental-dot {
+    animation: none !important;
+    opacity: 0.7 !important;
+  }
+}
+
+/* Reduced Transparency */
+@media (prefers-reduced-transparency: reduce) {
+  .app-container.mini-player,
+  .bottom-player-section,
+  .fixed-header-section,
+  .apple-context-menu,
+  .titlebar-actions-capsule,
+  .unified-control-container {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .app-container.mini-player {
+    background: #141416 !important;
+  }
+
+  .bottom-player-section,
+  .fixed-header-section {
+    background: #18181c !important;
+  }
+
+  .dynamic-bg {
+    display: none !important;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: more) {
+  :root {
+    --glass-border: rgba(255, 255, 255, 0.35);
+    --lyric-inactive: rgba(255, 255, 255, 0.6);
+  }
+
+  .lyric-line {
+    filter: none !important;
+  }
+
+  .traffic-light {
+    border-width: 1.5px !important;
+  }
+}
+
+/* ==========================================================================
+   macOS Design Skill: Native Interactions, Sheets & HUD Feedback
+   ========================================================================== */
+
+/* Context Menu Separator */
+.context-menu-separator {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 4px 6px;
+}
+
+/* Native macOS Keyboard Key Badges (<kbd>) */
+.macos-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  border: 0.5px solid rgba(255, 255, 255, 0.2);
+  color: var(--label-primary);
+  opacity: 0.85;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+  min-width: 18px;
+  line-height: 1.3;
+}
+
+body.theme-light .macos-kbd {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #1d1d1f;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+}
+
+/* Native macOS Heads-Up Display (HUD Toast) */
+.macos-hud-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  background: rgba(24, 24, 28, 0.85);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 6px 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 12px 28px rgba(0, 0, 0, 0.45);
+  color: #ffffff;
+  pointer-events: none;
+  animation: macos-hud-enter 0.25s var(--ease-spring);
+}
+
+body.theme-light .macos-hud-toast {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1d1d1f;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 24px rgba(0, 0, 0, 0.12);
+}
+
+@keyframes macos-hud-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+.hud-toast-text {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ==========================================================================
+   Animated Artwork Mode (Fullscreen Presentation - Images 1 & 2 Reference)
+   ========================================================================== */
+
+.animated-artwork-mode-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #000000;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  border-radius: 28px;
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-specular),
+    inset 0 0 0 0.5px var(--glass-border);
+}
+
+/* Fullscreen Video Background & Readability Gradient */
+.animated-bg-root {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  overflow: hidden;
+  background: #000000;
+}
+
+.animated-bg-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.animated-bg-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 1;
+  filter: brightness(0.65);
+  transform: scale(1.08);
+  pointer-events: none;
+}
+
+/* Readability overlay: clean dark gradient for text legibility without video blur */
+.animated-bg-readability-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.45) 0%,
+    rgba(0, 0, 0, 0.05) 30%,
+    rgba(0, 0, 0, 0.25) 55%,
+    rgba(0, 0, 0, 0.72) 80%,
+    rgba(0, 0, 0, 0.92) 100%
+  );
+}
+
+body.theme-light .animated-bg-readability-overlay {
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.5) 0%,
+    rgba(0, 0, 0, 0.1) 30%,
+    rgba(0, 0, 0, 0.35) 55%,
+    rgba(0, 0, 0, 0.78) 80%,
+    rgba(0, 0, 0, 0.95) 100%
+  );
+}
+
+/* Foreground UI Layer */
+.animated-artwork-foreground-layer {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  justify-content: space-between;
+}
+
+/* 1. Top Compact Player Bar (Apple Music/macOS Inspired) */
+.animated-artwork-top-player {
+  padding: 40px 16px 8px 16px;
+  width: 100%;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.animated-artwork-top-player .player-header {
+  padding: 8px 14px;
+  background: rgba(18, 18, 20, 0.55);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+body.theme-light .animated-artwork-top-player .player-header {
+  background: rgba(255, 255, 255, 0.65);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* ==========================================================================
+   Animated Artwork Mode: Current Line Docked Directly Above Metadata & Controls
+   ========================================================================== */
+
+/* Main layout modifier in animated mode */
+.main-content-layer.animated-layout {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+}
+
+/* Dedicated container for the single current lyric line */
+.animated-current-line-container {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* Cleanly docks right above the bottom player section */
+  align-items: stretch; /* Allows natural alignment from API (left by default, right for opposite) */
+  padding: 0 clamp(16px, 5vmin, 44px) 16px clamp(16px, 5vmin, 44px);
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+  user-select: none;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.animated-lyric-area {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  position: relative;
+}
+
+/* Single line mode container reusing lyrics-container word-mode/line-mode tokens */
+.lyrics-container.animated-single-line-container {
+  height: auto;
+  overflow: visible;
+  padding: 0;
+  contain: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+/* Ensure the single lyric line matches the simple player's exact geometry and API location */
+.animated-single-line-container .lyric-line {
+  margin-bottom: 0;
+  cursor: default;
+  transform-origin: bottom left;
+  user-select: text;
+  width: 100%;
+  opacity: 1;
+  transform: none;
+  filter: none !important;
+}
+
+.animated-single-line-container .lyric-line.opposite-aligned {
+  align-self: flex-end;
+  text-align: right;
+  transform-origin: bottom right;
+}
+
+.animated-single-line-container .lyric-line.opposite-aligned .words-container {
+  justify-content: flex-end;
+}
+
+.animated-single-line-container .lyric-line.active-line {
+  font-size: clamp(1.45rem, 6vmin, 3.2rem);
+}
+
+/* In word-mode, lyric-line must have NO text-shadow so WebKit background-clip: text wash works cleanly */
+.lyrics-container.word-mode .lyric-line,
+.lyrics-container.word-mode .lyric-line.active-line,
+.animated-single-line-container.word-mode .lyric-line,
+.animated-single-line-container.word-mode .lyric-line.active-line {
+  text-shadow: none !important;
+}
+
+/* In line-mode-only, active line glows prominently */
+.lyrics-container.line-mode-only .lyric-line.active-line,
+.animated-single-line-container.line-mode-only .lyric-line.active-line {
+  text-shadow:
+    0 0 24px var(--lyric-glow),
+    0 2px 14px rgba(0, 0, 0, 0.85);
+}
+
+.animated-single-line-container .lyric-line.bg-line.active-line {
+  font-size: clamp(1.15rem, 4.8vmin, 2.5rem);
+}
+
+.animated-single-line-container .instrumental-dots {
+  padding: 10px 0;
+}
+
+.animated-lyric-placeholder {
+  font-size: clamp(16px, 2.8vmin, 22px);
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: left;
+  text-shadow:
+    0 0 20px rgba(255, 255, 255, 0.4),
+    0 2px 14px rgba(0, 0, 0, 0.9);
+}
+
+.animated-lyrics-attribution {
+  margin-top: 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.58);
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+.animated-lyrics-attribution .attribution-link {
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.animated-lyrics-attribution .attribution-link:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+/* 3. Static Album Artwork Positioned Directly Below Current Lyric */
+.animated-artwork-album-section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.animated-artwork-album-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.animated-artwork-album-card {
+  width: clamp(84px, 18vmin, 130px);
+  height: clamp(84px, 18vmin, 130px);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.65),
+    0 4px 10px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.animated-artwork-album-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Context Menu Dividers and Disabled Items */
+.context-menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 6px;
+}
+
+body.theme-light .context-menu-divider {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.context-menu-item.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}

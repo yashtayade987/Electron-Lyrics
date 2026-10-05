@@ -1,0 +1,190 @@
+/* macOS Window Titlebar Chrome */
+.mac-titlebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 36px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* Middle Drag Region */
+.titlebar-drag-region {
+    flex: 1;
+    height: 100%;
+    pointer-events: auto;
+    -webkit-app-region: drag !important;
+}
+
+/* Left Actions Group: Positioned directly above the Album Art (shifted 3px left) */
+.titlebar-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: -3px;
+    pointer-events: auto !important;
+    -webkit-app-region: no-drag !important;
+    z-index: 101;
+    width: clamp(48px, 12vmin, 68px);
+    justify-content: flex-start;
+}
+
+/* Clean Borderless Buttons (No pill container) */
+.titlebar-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: var(--label-secondary);
+    cursor: pointer !important;
+    transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+    -webkit-app-region: no-drag !important;
+    pointer-events: auto !important;
+    position: relative;
+    padding: 0;
+}
+
+.titlebar-icon-btn:hover {
+    color: var(--label-primary);
+    background: rgba(255, 255, 255, 0.14);
+    transform: scale(1.08);
+}
+
+body.theme-light .titlebar-icon-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.titlebar-icon-btn:active {
+    transform: scale(0.92);
+}
+
+.titlebar-icon-btn:focus-visible {
+    outline: 2px solid #0071e3;
+    outline-offset: 1px;
+}
+
+/* Service Logo Button */
+.service-logo-btn {
+    position: relative;
+}
+
+.service-logo-btn .service-logo {
+    display: block;
+    transition: transform 0.2s ease, filter 0.2s ease;
+    border-radius: 50%;
+}
+
+.service-logo-btn.disconnected .service-logo {
+    opacity: 0.85;
+}
+
+.service-offline-badge {
+    position: absolute;
+    bottom: 0px;
+    right: 0px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ff9f0a;
+    border: 1px solid rgba(0, 0, 0, 0.6);
+    box-shadow: 0 0 4px rgba(255, 159, 10, 0.8);
+}
+
+/* Right Side: Authentic macOS Traffic Lights */
+.traffic-lights-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    pointer-events: auto !important;
+    -webkit-app-region: no-drag !important;
+    z-index: 101;
+    padding: 2px 0;
+}
+
+.traffic-light {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 0.5px solid rgba(0, 0, 0, 0.18);
+    position: relative;
+    cursor: pointer !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin: 0;
+    outline: none;
+    transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), filter 0.15s ease;
+    -webkit-app-region: no-drag !important;
+    pointer-events: auto !important;
+}
+
+/* Expand clickable hit target to 26x26px without altering visual 12px dot */
+.traffic-light::before {
+    content: '';
+    position: absolute;
+    inset: -7px;
+    border-radius: 50%;
+    pointer-events: auto !important;
+    -webkit-app-region: no-drag !important;
+}
+
+/* Red (Close) */
+.traffic-light.close {
+    background: #ff5f56;
+    border-color: #e0443e;
+}
+
+/* Yellow (Minimize) */
+.traffic-light.minimize {
+    background: #ffbd2e;
+    border-color: #dea123;
+}
+
+/* Green (Pin / Always On Top) */
+.traffic-light.pin {
+    background: #27c93f;
+    border-color: #1aab29;
+}
+
+.traffic-light.pin.pinned {
+    box-shadow: 0 0 6px rgba(39, 201, 63, 0.6);
+}
+
+.traffic-light:hover {
+    filter: brightness(1.08);
+}
+
+.traffic-light:active {
+    transform: scale(0.92);
+    filter: brightness(0.9);
+}
+
+/* Glyphs on Hover */
+.traffic-light-glyph {
+    opacity: 0;
+    font-size: 8px;
+    font-weight: 700;
+    color: rgba(0, 0, 0, 0.65);
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s ease;
+    user-select: none;
+    pointer-events: none;
+}
+
+.traffic-lights-group:hover .traffic-light-glyph {
+    opacity: 1;
+}

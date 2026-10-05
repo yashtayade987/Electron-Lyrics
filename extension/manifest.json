@@ -1,0 +1,96 @@
+{
+    "manifest_version": 3,
+    "name": "Lyrics App Bridge",
+    "version": "1.1",
+    "description": "Sends currently playing song info from YouTube Music, Spotify, and Apple Music to the Lyrics App.",
+    "permissions": [
+        "scripting",
+        "activeTab"
+    ],
+    "host_permissions": [
+        "*://music.youtube.com/*",
+        "*://open.spotify.com/*",
+        "*://*.spotify.com/*",
+        "*://*.spotifycdn.com/*",
+        "*://*.scdn.co/*",
+        "*://music.apple.com/*",
+        "*://beta.music.apple.com/*",
+        "http://localhost:4000/*"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "*://music.youtube.com/*"
+            ],
+            "js": [
+                "js/socket.io.min.js",
+                "js/youtube.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "*://open.spotify.com/*"
+            ],
+            "js": [
+                "js/spotify-inject.js"
+            ],
+            "world": "MAIN",
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "*://open.spotify.com/*"
+            ],
+            "js": [
+                "js/socket.io.min.js",
+                "js/spotify.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "*://music.apple.com/*",
+                "*://beta.music.apple.com/*"
+            ],
+            "js": [
+                "js/apple-inject.js"
+            ],
+            "world": "MAIN",
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
+                "*://music.apple.com/*",
+                "*://beta.music.apple.com/*"
+            ],
+            "js": [
+                "js/socket.io.min.js",
+                "js/apple.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "js/spotify-inject.js"
+            ],
+            "matches": [
+                "*://open.spotify.com/*"
+            ]
+        },
+        {
+            "resources": [
+                "js/apple-inject.js"
+            ],
+            "matches": [
+                "*://music.apple.com/*",
+                "*://beta.music.apple.com/*"
+            ]
+        }
+    ],
+    "action": {
+        "default_title": "Lyrics Bridge"
+    }
+}

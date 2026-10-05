@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "apple-design": {
+      "source": "dickwu/apple-design-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "6905c425ef8dd6c5d1407b01fbaf42ee00cccc28ad0c380df65e731bead3bb91"
+    },
+    "exhaustive-code-slimmer": {
+      "source": "JUNERDD/skills",
+      "sourceType": "github",
+      "skillPath": "skills/exhaustive-code-slimmer/SKILL.md",
+      "computedHash": "a9131df9e63c978701c9b85130e599181b685df4b975423fcb3efa5e7f79621b"
+    },
+    "macos-design": {
+      "source": "ceorkm/macos-design-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "14b1b7e02514b4bd9b6a2889e8ba474a6f2d73900fae747d78dca1084a334623"
+    }
+  }
+}

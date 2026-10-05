@@ -1,0 +1,3 @@
+@echo off
+echo Launching Beautiful Lyrics Desktop App...
+npm run electron:dev
