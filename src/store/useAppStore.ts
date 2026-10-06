@@ -16,10 +16,9 @@ interface SongDetails {
   source: 'youtube' | 'spotify' | 'apple' | null;
   isExplicit?: boolean;
   animatedArtwork?: AnimatedArtworkData;
-  animatedArtworkUrl?: string | null;
-  animatedArtworkTallUrl?: string | null;
   videoId?: string;
   canvasUrl?: string | null;
+  _origin?: 'windows_media' | 'extension';
 }
 
 interface AppState {
@@ -46,8 +45,6 @@ interface AppState {
   // UI State
   isRomanized: boolean;
   toggleRomanized: () => void;
-  backgroundType: 'dynamic' | 'static' | 'color';
-  setBackgroundType: (type: 'dynamic' | 'static' | 'color') => void;
   theme: 'dynamic' | 'dark' | 'light';
   setTheme: (theme: 'dynamic' | 'dark' | 'light') => void;
 
@@ -68,7 +65,36 @@ interface AppState {
   syncOffsetMs: number;
   setSyncOffsetMs: (offset: number) => void;
   adjustSyncOffsetMs: (delta: number) => number;
+  // Audio source selection: 'web' | 'desktop'
+  sourceMode: 'web' | 'desktop';
+  lastDesktopSong: SongDetails | null;
+  lastWebSong: SongDetails | null;
+  setSourceMode: (mode: 'web' | 'desktop') => void;
+  updateSourceProgress: (origin: 'windows_media' | 'extension', progress: number, isPlaying: boolean, duration?: number) => void;
 }
+
+const emptySongDetails: SongDetails = {
+  id: null,
+  title: 'No song playing',
+  artist: 'Waiting for connection...',
+  album: '',
+  coverArt: '',
+  duration: 0,
+  progress: 0,
+  isPlaying: false,
+  source: null,
+  isExplicit: false,
+  animatedArtwork: {
+    available: false,
+    source: null,
+    videoUrl: null,
+    videoTallUrl: null,
+    previewUrl: null,
+    artworkId: null
+  },
+  videoId: undefined,
+  canvasUrl: null
+};
 
 let hudTimeout: number | undefined;
 
@@ -130,28 +156,7 @@ export function isSameSong(
 
 export const useAppStore = create<AppState>((set) => ({
   currentSong: {
-    id: null,
-    title: 'No song playing',
-    artist: 'Waiting for connection...',
-    album: '',
-    coverArt: '',
-    duration: 0,
-    progress: 0,
-    isPlaying: false,
-    source: null,
-    isExplicit: false,
-    animatedArtwork: {
-      available: false,
-      source: null,
-      videoUrl: null,
-      videoTallUrl: null,
-      previewUrl: null,
-      artworkId: null
-    },
-    animatedArtworkUrl: null,
-    animatedArtworkTallUrl: null,
-    videoId: undefined,
-    canvasUrl: null
+    ...emptySongDetails
   },
   lyrics: null,
   lyricsLoading: false,
@@ -171,22 +176,35 @@ export const useAppStore = create<AppState>((set) => ({
 
   setSong: (song) =>
     set((state) => {
+      const origin = song._origin;
+      const isFromDesktop = origin === 'windows_media';
+      const isFromWeb = origin === 'extension';
+
+      // Pick previous track of the same source origin to cleanly merge updates
+      const prevSourceSong = isFromDesktop
+        ? state.lastDesktopSong
+        : isFromWeb
+        ? state.lastWebSong
+        : state.currentSong;
+
+      const baseSong = prevSourceSong || emptySongDetails;
+
       const isSame = isSameSong(
-        state.currentSong.title,
-        state.currentSong.artist,
+        baseSong.title,
+        baseSong.artist,
         song.title,
         song.artist
       );
 
-      // Only mark as a genuinely new track if titles and artists do NOT match the current song
+      // Only mark as a genuinely new track if titles and artists do NOT match
       const isNewTrack = !isSame && Boolean(
         song.title &&
-        song.title !== state.currentSong.title &&
-        state.currentSong.title !== 'No song playing'
+        song.title !== baseSong.title &&
+        baseSong.title !== 'No song playing'
       );
 
       // Preserve existing animated artwork and canvasUrl when updates arrive for the same playing track
-      const preservedAnimatedArtwork = isSame ? state.currentSong.animatedArtwork : {
+      const preservedAnimatedArtwork = isSame ? baseSong.animatedArtwork : {
         available: false,
         source: null,
         videoUrl: null,
@@ -195,49 +213,60 @@ export const useAppStore = create<AppState>((set) => ({
         artworkId: null
       };
 
-      const preservedAnimatedArtworkUrl = isSame ? state.currentSong.animatedArtworkUrl : null;
-      const preservedAnimatedArtworkTallUrl = isSame ? state.currentSong.animatedArtworkTallUrl : null;
-
       const effectiveCanvasUrl = (song.canvasUrl && typeof song.canvasUrl === 'string' && song.canvasUrl.startsWith('http'))
         ? song.canvasUrl
-        : (isSame ? state.currentSong.canvasUrl : null);
+        : (isSame ? baseSong.canvasUrl : null);
 
       const nextArtwork = song.animatedArtwork ?? (
-        (isSame && state.currentSong.animatedArtwork?.available && state.currentSong.animatedArtwork?.videoUrl)
-          ? state.currentSong.animatedArtwork
+        (isSame && baseSong.animatedArtwork?.available && baseSong.animatedArtwork?.videoUrl)
+          ? baseSong.animatedArtwork
           : preservedAnimatedArtwork
       );
 
-      const nextVideoUrl = song.animatedArtworkUrl ?? (
-        song.animatedArtwork ? song.animatedArtwork.videoUrl : preservedAnimatedArtworkUrl
-      );
-
-      const nextVideoTallUrl = song.animatedArtworkTallUrl ?? (
-        song.animatedArtwork ? (song.animatedArtwork.videoTallUrl || song.animatedArtwork.videoUrl) : preservedAnimatedArtworkTallUrl
-      );
+      let safeCoverArt = baseSong.coverArt;
+      const rawCover: unknown = song.coverArt;
+      if (rawCover !== undefined) {
+        if (typeof rawCover === 'string') {
+          safeCoverArt = rawCover;
+        } else if (Array.isArray(rawCover)) {
+          safeCoverArt = (rawCover.find((c: unknown) => typeof c === 'string' && c.length > 0) as string) || '';
+        } else {
+          safeCoverArt = '';
+        }
+      }
 
       const updatedSong: SongDetails = {
-        ...state.currentSong,
+        ...baseSong,
         ...song,
+        coverArt: safeCoverArt,
         progress: isNewTrack
           ? (song.progress !== undefined ? song.progress : 0)
-          : (song.progress !== undefined ? song.progress : state.currentSong.progress),
+          : (song.progress !== undefined ? song.progress : baseSong.progress),
         id: (song.id !== undefined && song.id !== null)
           ? song.id
-          : (isSame ? state.currentSong.id : null),
+          : (isSame ? baseSong.id : null),
         canvasUrl: effectiveCanvasUrl,
         videoId: (song.videoId !== undefined)
           ? song.videoId
-          : (isSame ? state.currentSong.videoId : undefined),
+          : (isSame ? baseSong.videoId : undefined),
         animatedArtwork: nextArtwork,
-        animatedArtworkUrl: nextVideoUrl,
-        animatedArtworkTallUrl: nextVideoTallUrl
+        _origin: origin || baseSong._origin
       };
 
+      const nextDesktop = isFromDesktop ? updatedSong : state.lastDesktopSong;
+      const nextWeb = isFromWeb ? updatedSong : state.lastWebSong;
+
+      // Only update currentSong if incoming update matches current sourceMode or if no origin specified
+      const shouldApplyToCurrent = (state.sourceMode === 'desktop' && isFromDesktop) ||
+                                  (state.sourceMode === 'web' && isFromWeb) ||
+                                  (!origin);
+
       return {
-        currentSong: updatedSong,
-        // Clear manual override ONLY on a genuine track change, never on same-song metadata updates
-        manualArtworkOverride: isNewTrack ? null : state.manualArtworkOverride
+        currentSong: shouldApplyToCurrent ? updatedSong : state.currentSong,
+        lastDesktopSong: nextDesktop,
+        lastWebSong: nextWeb,
+        // Clear manual override ONLY on a genuine track change on active track
+        manualArtworkOverride: (shouldApplyToCurrent && isNewTrack) ? null : state.manualArtworkOverride
       };
     }),
   setAnimatedArtwork: (artwork) =>
@@ -253,9 +282,7 @@ export const useAppStore = create<AppState>((set) => ({
               videoTallUrl: null,
               previewUrl: null,
               artworkId: null
-            },
-            animatedArtworkUrl: null,
-            animatedArtworkTallUrl: null
+            }
           }
         };
       }
@@ -270,9 +297,7 @@ export const useAppStore = create<AppState>((set) => ({
             videoTallUrl: videoTall,
             previewUrl: artwork.previewUrl ?? state.currentSong.coverArt,
             artworkId: artwork.artworkId ?? null
-          },
-          animatedArtworkUrl: artwork.videoUrl,
-          animatedArtworkTallUrl: videoTall
+          }
         }
       };
     }),
@@ -296,8 +321,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   isRomanized: false,
   toggleRomanized: () => set((state) => ({ isRomanized: !state.isRomanized })),
-  backgroundType: 'dynamic',
-  setBackgroundType: (type) => set({ backgroundType: type }),
   theme: (localStorage.getItem('theme') as 'dynamic' | 'dark' | 'light') || 'dynamic',
   setTheme: (theme) => set({ theme }),
 
@@ -313,21 +336,88 @@ export const useAppStore = create<AppState>((set) => ({
     }, 1500);
   },
 
-  lyricMode: (localStorage.getItem('lyric-engine-mode') as 'auto' | 'line' | 'word') || 'auto',
+  lyricMode: (localStorage.getItem('lyric-engine-mode') as 'auto' | 'line' | 'word') || 'word',
   setLyricMode: (lyricMode) => {
     localStorage.setItem('lyric-engine-mode', lyricMode);
     set({ lyricMode });
   },
-  syncOffsetMs: 600,
-  setSyncOffsetMs: (syncOffsetMs) => set({ syncOffsetMs }),
+  syncOffsetMs: (() => {
+    const saved = localStorage.getItem('lyric-sync-offset-ms');
+    return saved !== null ? (parseInt(saved, 10) || 0) : 0;
+  })(),
+  setSyncOffsetMs: (syncOffsetMs) => {
+    localStorage.setItem('lyric-sync-offset-ms', String(syncOffsetMs));
+    set({ syncOffsetMs });
+  },
   adjustSyncOffsetMs: (delta) => {
-    let newOffset = 600;
+    let newOffset = 0;
     set((state) => {
       newOffset = Math.max(-5000, Math.min(5000, state.syncOffsetMs + delta));
+      localStorage.setItem('lyric-sync-offset-ms', String(newOffset));
       return { syncOffsetMs: newOffset };
     });
     return newOffset;
-  }
+  },
+  sourceMode: (localStorage.getItem('preferred-source-mode') as 'web' | 'desktop') || 'web',
+  lastDesktopSong: null,
+  lastWebSong: null,
+  setSourceMode: (mode) => {
+    localStorage.setItem('preferred-source-mode', mode);
+    set((state) => {
+      const targetSong = mode === 'desktop' ? state.lastDesktopSong : state.lastWebSong;
+      if (targetSong && targetSong.title && targetSong.title !== 'No song playing') {
+        return {
+          sourceMode: mode,
+          currentSong: targetSong
+        };
+      }
+      return {
+        sourceMode: mode,
+        currentSong: {
+          ...emptySongDetails,
+          title: 'No song playing',
+          artist: mode === 'desktop' ? 'Waiting for Desktop App...' : 'Waiting for Web Player...',
+          isPlaying: false,
+          coverArt: '',
+          duration: 0,
+          progress: 0,
+          source: null,
+          _origin: mode === 'desktop' ? 'windows_media' : 'extension'
+        }
+      };
+    });
+  },
+  updateSourceProgress: (origin, progress, isPlaying, duration) =>
+    set((state) => {
+      const isDesktop = origin === 'windows_media';
+      const targetProp = isDesktop ? 'lastDesktopSong' : 'lastWebSong';
+      const targetSong = state[targetProp];
+      const updatedTarget = targetSong ? {
+        ...targetSong,
+        progress,
+        isPlaying,
+        ...(duration && duration > 0 ? { duration } : {})
+      } : null;
+
+      const shouldApplyToCurrent = (state.sourceMode === 'desktop' && isDesktop) ||
+                                  (state.sourceMode === 'web' && !isDesktop);
+
+      if (shouldApplyToCurrent && state.currentSong) {
+        return {
+          [targetProp]: updatedTarget,
+          currentSong: {
+            ...state.currentSong,
+            progress,
+            isPlaying,
+            ...(duration && duration > 0 && (!state.currentSong.duration || state.currentSong.duration === 0) ? { duration } : {})
+          }
+        };
+      }
+
+      return {
+        [targetProp]: updatedTarget
+      };
+    })
 }));
 
 

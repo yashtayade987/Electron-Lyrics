@@ -32,7 +32,7 @@ function findElementDeep(selector, root = document) {
     return null;
 }
 
-// Trigger click with full pointer & mouse event cycle
+// Trigger click with clean single click event
 function triggerClick(element) {
     if (!element) return false;
     try {
@@ -42,9 +42,10 @@ function triggerClick(element) {
         element.dispatchEvent(new MouseEvent('mousedown', eventOptions));
         element.dispatchEvent(new PointerEvent('pointerup', eventOptions));
         element.dispatchEvent(new MouseEvent('mouseup', eventOptions));
-        element.dispatchEvent(new MouseEvent('click', eventOptions));
         if (typeof element.click === 'function') {
             element.click();
+        } else {
+            element.dispatchEvent(new MouseEvent('click', eventOptions));
         }
         return true;
     } catch (err) {
@@ -86,17 +87,58 @@ setTimeout(() => {
     }
 }, 1500);
 
+let lastCommandTime = 0;
+let lastCommandAction = '';
+
+function triggerInstantBurstScan() {
+    const prevKey = lastSongId;
+    let scans = 0;
+    const maxScans = 40; // 40 scans * 30ms = 1.2s max duration
+    const timer = setInterval(() => {
+        scans++;
+        const data = getAppleMusicData();
+        if (data && data.title) {
+            const newKey = `${data.title}-${data.artist}`;
+            if (newKey !== prevKey) {
+                clearInterval(timer);
+                console.log(`[LyricsBridge: Apple] Instant track change detected on scan #${scans} (${scans * 30}ms):`, data.title);
+                sendSongUpdate(data);
+                return;
+            }
+        }
+        if (scans >= maxScans) {
+            clearInterval(timer);
+        }
+    }, 30);
+}
+
 // Listen for music commands from Electron app
 socket.on('music_command', (data) => {
+    if (!data?.action) return;
+    const now = Date.now();
+    if (data.action === lastCommandAction && now - lastCommandTime < 150) {
+        console.log('[LyricsBridge: Apple] Debouncing duplicate music command:', data.action);
+        return;
+    }
+    lastCommandTime = now;
+    lastCommandAction = data.action;
+
     console.log('[LyricsBridge: Apple] Music command received:', data.action);
 
-    // 1. Send command to MusicKit in the Main World
-    window.postMessage({
-        sender: 'lyrics-app-apple-command',
-        action: data.action
-    }, '*');
+    // If MusicKit is active in the Main World, forward exclusively to MusicKit to prevent duplicate actions
+    const isMusicKitActive = latestMusicKitData && (Date.now() - lastMusicKitTimestamp < 10000);
+    if (isMusicKitActive) {
+        window.postMessage({
+            sender: 'lyrics-app-apple-command',
+            action: data.action
+        }, '*');
+        if (data.action === 'next' || data.action === 'previous') {
+            triggerInstantBurstScan();
+        }
+        return;
+    }
 
-    // 2. Also attempt deep DOM click fallback
+    // Fallback to DOM button click only when MusicKit API is not active
     switch (data.action) {
         case 'previous':
             clickDeepButton([
@@ -108,6 +150,7 @@ socket.on('music_command', (data) => {
                 'button.playback-button--previous',
                 '.web-chrome-playback-controls__previous-btn'
             ]);
+            triggerInstantBurstScan();
             break;
 
         case 'play-pause':
@@ -133,6 +176,7 @@ socket.on('music_command', (data) => {
                 'button.playback-button--next',
                 '.web-chrome-playback-controls__next-btn'
             ]);
+            triggerInstantBurstScan();
             break;
     }
 });
@@ -280,9 +324,18 @@ function getAppleMusicData() {
     };
 }
 
+let lastEmittedTrackId = '';
+let lastEmittedAlbum = '';
+let lastEmittedCover = '';
+let lastEmittedDuration = 0;
+
 function sendSongUpdate(data) {
     if (!data.title) return;
     lastSongId = `${data.title}-${data.artist}`;
+    lastEmittedTrackId = data.id || '';
+    lastEmittedAlbum = data.album || '';
+    lastEmittedCover = data.coverArt || '';
+    lastEmittedDuration = data.duration || 0;
     isCurrentActiveTab = true;
     console.log('[LyricsBridge: Apple] New Song Update:', data.title, 'by', data.artist);
     socket.emit('song_update', data);
@@ -300,6 +353,26 @@ function sendProgressUpdate(data) {
     });
 }
 
+function checkAndUpdateApple() {
+    const data = getAppleMusicData();
+    if (!data.title) return;
+
+    const songId = `${data.title}-${data.artist}`;
+    const isNewSong = songId !== lastSongId;
+    const isNewTrackId = Boolean(data.id && data.id !== lastEmittedTrackId);
+    const isNewAlbum = Boolean(data.album && !lastEmittedAlbum);
+    const isNewCover = Boolean(data.coverArt && data.coverArt !== lastEmittedCover);
+    const isNewDuration = Boolean(data.duration && !lastEmittedDuration);
+
+    if (isNewSong || isNewTrackId || isNewAlbum || isNewCover || isNewDuration) {
+        sendSongUpdate(data);
+    } else {
+        if (data.isPlaying || isCurrentActiveTab) {
+            sendProgressUpdate(data);
+        }
+    }
+}
+
 // Send current song immediately on connection/reconnection
 socket.on('connect', () => {
     console.log('[LyricsBridge: Apple] Connected to Lyrics Electron App');
@@ -309,17 +382,12 @@ socket.on('connect', () => {
     }
 });
 
-// Periodic status poll
-setInterval(() => {
+socket.on('request_current_song', () => {
     const data = getAppleMusicData();
-    if (!data.title) return;
-
-    const songId = `${data.title}-${data.artist}`;
-    if (songId !== lastSongId) {
+    if (data.title) {
         sendSongUpdate(data);
-    } else {
-        if (data.isPlaying || isCurrentActiveTab) {
-            sendProgressUpdate(data);
-        }
     }
-}, 300);
+});
+
+// Periodic status poll
+setInterval(checkAndUpdateApple, 150);

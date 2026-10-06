@@ -61,8 +61,16 @@ export const Header = () => {
     const [shouldScroll, setShouldScroll] = useState(false);
     const titleContainerRef = useRef<HTMLDivElement>(null);
     const titleTextRef = useRef<HTMLSpanElement>(null);
+    const lastCommandRef = useRef<{ name: string; time: number }>({ name: '', time: 0 });
 
     const handleMusicCommand = (command: string) => {
+        const now = Date.now();
+        if (lastCommandRef.current.name === command && now - lastCommandRef.current.time < 150) {
+            console.log(`[Header] Debounced rapid music command: ${command}`);
+            return;
+        }
+        lastCommandRef.current = { name: command, time: now };
+
         console.log(`[Header] Music command: ${command}`);
 
         if (command === 'play-pause') {
@@ -78,16 +86,19 @@ export const Header = () => {
                 showHud('No song playing');
             } else {
                 showHud('Next Track');
+                useAppStore.getState().updateProgress(0);
             }
         } else if (command === 'previous') {
             if (!currentSong.title || currentSong.title === 'No song playing') {
                 showHud('No song playing');
             } else {
                 showHud('Previous Track');
+                useAppStore.getState().updateProgress(0);
             }
         }
 
         window.electron?.musicCommand(command);
+        window.dispatchEvent(new CustomEvent('app:music-command', { detail: command }));
     };
 
     const checkOverflow = useCallback(() => {

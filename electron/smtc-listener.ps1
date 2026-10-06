@@ -12,7 +12,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 try {
     [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime] | Out-Null
     [Windows.Storage.Streams.DataReader, Windows.Storage.Streams, ContentType = WindowsRuntime] | Out-Null
-    [System.Reflection.Assembly]::LoadWithPartialName('System.Runtime.WindowsRuntime') | Out-Null
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction SilentlyContinue
     Add-Type -AssemblyName System.Core -ErrorAction SilentlyContinue
 } catch {}
 
@@ -102,9 +102,6 @@ public static class DesktopMediaBridge {
 $asTaskGeneric = $null
 $asStreamMethod = $null
 try {
-    if (-not ([System.Management.Automation.PSTypeName]'System.WindowsRuntimeSystemExtensions').Type) {
-        [System.Reflection.Assembly]::LoadWithPartialName('System.Runtime.WindowsRuntime') | Out-Null
-    }
     $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { 
         $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' 
     })[0]
@@ -114,7 +111,7 @@ try {
     })[0]
 } catch {}
 
-function Await-WinRT($op, $type, $timeoutMs = 2000) { 
+function Await-WinRT($op, $type, $timeoutMs = 1500) { 
     if (-not $op -or -not $asTaskGeneric) { return $null }
     try {
         $asTask = $asTaskGeneric.MakeGenericMethod($type)
@@ -130,27 +127,29 @@ function Await-WinRT($op, $type, $timeoutMs = 2000) {
 
 function Get-ThumbnailBase64($streamRef) {
     if (-not $streamRef -or -not $asStreamMethod) { return "" }
+    $b64 = ""
     try {
-        $stream = Await-WinRT ($streamRef.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType]) 2500
-        if (-not $stream -or $stream.Size -eq 0 -or $stream.Size -gt 2097152) { return "" }
-        $netStream = $asStreamMethod.Invoke($null, @($stream))
-        $memStream = New-Object System.IO.MemoryStream
-        try {
-            $netStream.CopyTo($memStream)
-            $bytes = $memStream.ToArray()
-            if ($bytes.Length -gt 0) {
-                $b64 = [Convert]::ToBase64String($bytes)
-                return "data:image/jpeg;base64,$b64"
+        $stream = Await-WinRT ($streamRef.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType]) 1500
+        if ($stream -and $stream.Size -gt 0 -and $stream.Size -le 1048576) {
+            $netStream = $asStreamMethod.Invoke($null, @($stream))
+            $memStream = New-Object System.IO.MemoryStream
+            try {
+                $netStream.CopyTo($memStream)
+                $bytes = $memStream.ToArray()
+                if ($bytes.Length -gt 0) {
+                    $b64 = "data:image/jpeg;base64," + [Convert]::ToBase64String($bytes)
+                }
+            } finally {
+                if ($memStream) { try { $memStream.Dispose() } catch {} }
+                if ($netStream) { try { $netStream.Dispose() } catch {} }
             }
-        } finally {
-            if ($memStream) { $memStream.Dispose() }
-            if ($netStream) { $netStream.Dispose() }
-            if ($stream) { $stream.Dispose() }
         }
     } catch {
         # ignore thumbnail read errors
+    } finally {
+        if ($stream) { try { $stream.Close() } catch {} }
     }
-    return ""
+    return $b64
 }
 
 function Detect-Source($appId) {
@@ -177,7 +176,7 @@ function Detect-Source($appId) {
 function Is-BrowserApp($appId) {
     if (-not $appId) { return $false }
     $lower = $appId.ToLowerInvariant()
-    return ($lower -like "*chrome*" -or $lower -like "*msedge*" -or $lower -like "*brave*" -or $lower -like "*firefox*" -or $lower -like "*opera*" -or $lower -like "*vivaldi*")
+    return ($lower -like "*chrome*" -or $lower -like "*msedge*" -or $lower -like "*edge*" -or $lower -like "*brave*" -or $lower -like "*firefox*" -or $lower -like "*opera*" -or $lower -like "*vivaldi*" -or $lower -like "*arc*" -or $lower -like "*browser*")
 }
 
 # Attempt initial GSMTC Manager connect (non-blocking, fast timeout)
@@ -196,9 +195,7 @@ $lastProgress = -1
 $lastReportTick = 0
 $lastCandidateSession = $null
 $lastMgrAttemptTick = [Environment]::TickCount
-$cachedMedia = $null
-$lastMediaCheckTick = 0
-$lastAppId = ""
+$lastIsPlaying = $false
 
 while ($true) {
     try {
@@ -227,7 +224,12 @@ while ($true) {
                 }
 
                 $handled = $false
-                if ($targetSession) {
+                if ($action -in @("force-update", "refresh", "poll")) {
+                    $lastSongKey = ""
+                    $lastReportTick = 0
+                    $handled = $true
+                }
+                if ($targetSession -and -not $handled) {
                     switch ($action) {
                         "play" {
                             $res = Await-WinRT ($targetSession.TryPlayAsync()) ([bool]) 1500
@@ -343,11 +345,7 @@ while ($true) {
             }
         }
 
-        # Priority 5: Fallback to any session if nothing else exists
-        if (-not $candidateSession -and $allSessions.Count -gt 0) {
-            $candidateSession = $allSessions[0]
-        }
-
+        # Do NOT fallback to browser sessions! Browser audio is handled strictly by the Web Extension.
         $lastCandidateSession = $candidateSession
 
         if ($candidateSession) {
@@ -378,16 +376,7 @@ while ($true) {
                 [Math]::Round($basePos)
             } else { 0 }
 
-            $needsMediaCheck = (-not $cachedMedia) -or ($candidateSession.SourceAppUserModelId -ne $lastAppId) -or ($statusStr -ne $lastStatus) -or ([Environment]::TickCount - $lastMediaCheckTick -gt 2500)
-            if ($needsMediaCheck) {
-                $lastMediaCheckTick = [Environment]::TickCount
-                $lastAppId = $candidateSession.SourceAppUserModelId
-                $freshMedia = Await-WinRT ($candidateSession.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]) 1000
-                if ($freshMedia -and $freshMedia.Title) {
-                    $cachedMedia = $freshMedia
-                }
-            }
-            $media = $cachedMedia
+            $media = Await-WinRT ($candidateSession.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]) 1500
             $rawTitle = if ($media -and $media.Title) { $media.Title.Trim() } else { "" }
             $rawArtist = if ($media -and $media.Artist) { $media.Artist.Trim() } else { "" }
             $rawAlbum = if ($media -and $media.AlbumTitle) { $media.AlbumTitle.Trim() } else { "" }
@@ -415,9 +404,11 @@ while ($true) {
                 }
 
                 $songKey = "$src::$rawTitle::$finalArtist"
+                $isResumedPlayback = ($isPlaying -and -not $lastIsPlaying)
+                $lastIsPlaying = $isPlaying
 
-                if ($songKey -ne $lastSongKey) {
-                    $isNewSong = ($lastSongKey -ne "")
+                if ($songKey -ne $lastSongKey -or $isResumedPlayback) {
+                    $isNewSong = ($lastSongKey -ne "" -and $songKey -ne $lastSongKey)
                     $lastSongKey = $songKey
                     $lastStatus = $statusStr
                     $lastReportTick = [Environment]::TickCount
@@ -430,7 +421,14 @@ while ($true) {
                     }
                     $lastProgress = $posMs
 
-                    $thumb = Get-ThumbnailBase64 $media.Thumbnail
+                    $thumbRaw = Get-ThumbnailBase64 $media.Thumbnail
+                    $thumb = ""
+                    if ($thumbRaw -is [array]) {
+                        $thumb = ($thumbRaw | Where-Object { $_ -is [string] -and $_ -ne "" } | Select-Object -First 1)
+                    } elseif ($thumbRaw -is [string]) {
+                        $thumb = $thumbRaw
+                    }
+                    if (-not $thumb) { $thumb = "" }
 
                     $data = @{
                         type = "song_update"
@@ -447,7 +445,7 @@ while ($true) {
                     [Console]::Out.WriteLine((ConvertTo-Json -Compress $data))
                     [Console]::Out.Flush()
                 }
-                elseif ($statusStr -ne $lastStatus -or [Math]::Abs($posMs - $lastProgress) -ge 500 -or ([Environment]::TickCount - $lastReportTick) -ge 300) {
+                elseif ($statusStr -ne $lastStatus -or [Math]::Abs($posMs - $lastProgress) -ge 1200 -or ([Environment]::TickCount - $lastReportTick) -ge 800) {
                     $lastStatus = $statusStr
                     $lastProgress = $posMs
                     $lastReportTick = [Environment]::TickCount
@@ -475,9 +473,10 @@ while ($true) {
                     $winTitle = $raw.Substring($dashIdx + 3).Trim()
                     $songKey = "spotify::$winTitle::$winArtist"
 
-                    if ($songKey -ne $lastSongKey) {
+                    if ($songKey -ne $lastSongKey -or -not $lastIsPlaying) {
                         $lastSongKey = $songKey
                         $lastStatus = "Playing"
+                        $lastIsPlaying = $true
                         $lastProgress = 0
                         $lastReportTick = [Environment]::TickCount
 
@@ -498,6 +497,7 @@ while ($true) {
                     }
                 }
             } else {
+                $lastIsPlaying = $false
                 if ($lastSongKey -ne "") {
                     if ($lastStatus -ne "Closed") {
                         $lastStatus = "Closed"
@@ -516,6 +516,6 @@ while ($true) {
         # Catch any transient COM/WinRT exceptions and continue loop smoothly
     }
 
-    $sleepMs = if ($lastStatus -eq "Playing") { 150 } else { 600 }
+    $sleepMs = if ($lastStatus -eq "Playing") { 300 } else { 700 }
     Start-Sleep -Milliseconds $sleepMs
 }

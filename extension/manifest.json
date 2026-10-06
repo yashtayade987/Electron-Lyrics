@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Lyrics App Bridge",
-    "version": "1.1",
+    "version": "1.2",
     "description": "Sends currently playing song info from YouTube Music, Spotify, and Apple Music to the Lyrics App.",
     "permissions": [
         "scripting",

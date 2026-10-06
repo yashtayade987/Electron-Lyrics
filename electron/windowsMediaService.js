@@ -90,12 +90,6 @@ export class WindowsMediaService extends EventEmitter {
 
     handleStdout(chunk) {
         this.buffer += chunk;
-        if (this.buffer.length > 1024 * 1024) {
-            // Cap buffer at 1MB to prevent memory exhaustion from runaway stdout
-            this.buffer = '';
-            return;
-        }
-
         const lines = this.buffer.split('\n');
         this.buffer = lines.pop(); // Keep incomplete line in buffer
 
@@ -152,21 +146,15 @@ export class WindowsMediaService extends EventEmitter {
             this.isRunning = false;
             try {
                 this.process.stdin.end(); // triggers clean exit via EOF
-                const proc = this.process;
-                this.process = null;
-                const killTimer = setTimeout(() => {
-                    try {
-                        if (proc && !proc.killed) {
-                            proc.kill('SIGKILL');
-                        }
-                    } catch {}
+                setTimeout(() => {
+                    if (this.process) {
+                        this.process.kill();
+                        this.process = null;
+                    }
                 }, 1000);
-                if (killTimer.unref) killTimer.unref();
             } catch {
-                if (this.process) {
-                    try { this.process.kill(); } catch {}
-                    this.process = null;
-                }
+                if (this.process) this.process.kill();
+                this.process = null;
             }
         }
     }

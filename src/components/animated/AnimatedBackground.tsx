@@ -91,10 +91,6 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
             if (animFrameId !== null) {
                 cancelAnimationFrame(animFrameId);
             }
-            if (canvas) {
-                canvas.width = 0;
-                canvas.height = 0;
-            }
         };
     }, [videoUrl, isVideoLoaded]);
 
@@ -214,8 +210,6 @@ export const AnimatedBackground: React.FC<AnimatedBackgroundProps> = ({
             }
             if (video) {
                 video.pause();
-                video.removeAttribute('src');
-                video.load();
             }
         };
     }, [videoUrl, isHlsStream]);

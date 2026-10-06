@@ -18,6 +18,30 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 let mainWindow;
 let io;
+let currentSourceMode = 'web';
+let lastSongData = null;
+let lastDesktopSong = null;
+let lastExtensionSong = null;
+
+function handleSourceSwitch(mode) {
+    console.log(`[Main Process] Source switch requested -> ${mode}`);
+    currentSourceMode = mode;
+    if (mode === 'desktop') {
+        if (lastDesktopSong && io) {
+            console.log(`[Main Process] Emitting cached desktop song: "${lastDesktopSong.title}"`);
+            io.emit('song_update', lastDesktopSong);
+        }
+        windowsMediaService.sendCommand('force-update');
+    } else if (mode === 'web') {
+        if (lastExtensionSong && io) {
+            console.log(`[Main Process] Emitting cached web extension song: "${lastExtensionSong.title}"`);
+            io.emit('song_update', lastExtensionSong);
+        }
+        if (io) {
+            io.emit('request_current_song');
+        }
+    }
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -264,9 +288,9 @@ async function resolveCanvasForTrack(trackId, explicitToken) {
 
 const SEARCH_SHA256 = 'eff59fa0a3d026b88b56fddbcf4bdfa16a186b8175a5c1a358c072e053c2e5b0';
 
-async function resolveSpotifyTrackAndArtwork(title, artist, explicitToken) {
+async function resolveTrackMetadataFromSpotify(title, artist, explicitToken) {
     if (!title || title === 'No song playing') return null;
-    const token = explicitToken || latestWebPlayerToken || await getAccessTokenFromSpDc();
+    let token = explicitToken || latestWebPlayerToken || await getAccessTokenFromSpDc();
     if (!token) return null;
 
     try {
@@ -281,52 +305,74 @@ async function resolveSpotifyTrackAndArtwork(title, artist, explicitToken) {
             .replace(/\s+/g, ' ')
             .trim();
         const primaryArtist = (artist || '').split(/[,&/]|feat\.|ft\./i)[0].trim();
-        const query = `${cleanTitle} ${primaryArtist}`.trim();
+        const queries = [`${cleanTitle} ${primaryArtist}`.trim()];
+        if (cleanTitle && cleanTitle !== queries[0]) {
+            queries.push(cleanTitle);
+        }
 
-        const variables = JSON.stringify({
-            searchTerm: query,
-            offset: 0,
-            limit: 5,
-            numberOfTopResults: 3,
-            includeAudiobooks: false,
-            includePreReleases: true,
-            includeAlbumPreReleases: false,
-            includeAuthors: false,
-            includeEpisodeContentRatingsV2: false,
-        });
-        const extensions = JSON.stringify({
-            persistedQuery: {
-                version: 1,
-                sha256Hash: SEARCH_SHA256,
+        for (const query of queries) {
+            const variables = JSON.stringify({
+                searchTerm: query,
+                offset: 0,
+                limit: 5,
+                numberOfTopResults: 3,
+                includeAudiobooks: false,
+                includePreReleases: true,
+                includeAlbumPreReleases: false,
+                includeAuthors: false,
+                includeEpisodeContentRatingsV2: false,
+            });
+            const extensions = JSON.stringify({
+                persistedQuery: {
+                    version: 1,
+                    sha256Hash: SEARCH_SHA256,
+                }
+            });
+            const queryParams = `?operationName=searchDesktop&variables=${encodeURIComponent(variables)}&extensions=${encodeURIComponent(extensions)}`;
+            let searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query${queryParams}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'app-platform': 'WebPlayer'
+                },
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (searchRes.status === 401) {
+                activeSpDcToken = null;
+                token = await getAccessTokenFromSpDc();
+                if (token) {
+                    searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query${queryParams}`, {
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                            'app-platform': 'WebPlayer'
+                        },
+                        signal: AbortSignal.timeout(5000)
+                    });
+                }
             }
-        });
-        const queryParams = `?operationName=searchDesktop&variables=${encodeURIComponent(variables)}&extensions=${encodeURIComponent(extensions)}`;
-        const searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query${queryParams}`, {
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'app-platform': 'WebPlayer'
-            },
-            signal: AbortSignal.timeout(5000)
-        });
-        if (!searchRes.ok) return null;
-        const data = await searchRes.json();
-        const items = data?.data?.searchV2?.tracksV2?.items;
-        if (items && items.length > 0) {
-            const itemData = items[0].item?.data;
-            const foundId = itemData?.id || null;
-            if (foundId) {
-                const coverSources = itemData?.albumOfTrack?.coverArt?.sources || [];
-                const sorted = [...coverSources].sort((a, b) => (b.width || 0) - (a.width || 0));
-                const coverArt = sorted[0]?.url || '';
-                const album = itemData?.albumOfTrack?.name || '';
-                const artistName = itemData?.artists?.items?.[0]?.profile?.name || primaryArtist;
-                console.log(`[Main Process] Resolved "${cleanTitle}" by "${primaryArtist}" -> Spotify ID: ${foundId}, CoverArt: ${Boolean(coverArt)}`);
-                return {
-                    id: foundId,
-                    coverArt: coverArt,
-                    album: album,
-                    artist: artistName
-                };
+
+            if (searchRes.ok) {
+                const data = await searchRes.json();
+                const items = data?.data?.searchV2?.tracksV2?.items;
+                if (items && items.length > 0) {
+                    const trackData = items[0].item?.data;
+                    const foundId = trackData?.id || null;
+                    if (foundId) {
+                        const albumName = trackData?.albumOfTrack?.name || '';
+                        const sources = trackData?.albumOfTrack?.coverArt?.sources || [];
+                        const coverArt = sources.length > 0
+                            ? (sources.find(s => s.width >= 600)?.url || sources[0]?.url || '')
+                            : '';
+                        const duration = trackData?.duration?.totalMilliseconds || 0;
+                        console.log(`[Main Process] Resolved "${cleanTitle}" by "${primaryArtist}" -> Spotify ID: ${foundId}, Album: "${albumName}", CoverArt: ${Boolean(coverArt)}`);
+                        return {
+                            id: foundId,
+                            album: albumName,
+                            coverArt: coverArt,
+                            duration: duration
+                        };
+                    }
+                }
             }
         }
     } catch (e) {
@@ -335,99 +381,38 @@ async function resolveSpotifyTrackAndArtwork(title, artist, explicitToken) {
     return null;
 }
 
-async function resolveTrackIdFromSpotify(title, artist, explicitToken) {
-    const res = await resolveSpotifyTrackAndArtwork(title, artist, explicitToken);
-    return res ? res.id : null;
-}
-
-async function resolveAppleMusicArtworkAndMotion(title, artist, album) {
+async function resolveMetadataFromITunes(title, artist) {
     if (!title || title === 'No song playing') return null;
     try {
-        const cleanTitle = (title || '')
-            .replace(/\(feat\..*?\)/gi, '')
-            .replace(/\[feat\..*?\]/gi, '')
-            .replace(/\(with.*?\)/gi, '')
-            .replace(/\[with.*?\]/gi, '')
-            .replace(/\(Official.*?Video.*?\)/gi, '')
-            .replace(/\[Official.*?Video.*?\]/gi, '')
-            .replace(/\(.*?\)|\[.*?\]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
+        const cleanTitle = (title || '').replace(/\(.*?\)|\[.*?\]/g, '').trim();
         const cleanArtist = (artist || '').split(/[,&/]|feat\.|ft\./i)[0].trim();
-        const candidateUrls = new Set();
-        let itunesCoverArt = '';
+        const queries = [`${cleanTitle} ${cleanArtist}`.trim()];
+        if (cleanTitle && cleanTitle !== queries[0]) queries.push(cleanTitle);
 
-        // 1. Search album entity if album provided
-        if (album && album.trim()) {
-            try {
-                const cleanAlbum = album.replace(/\s*-\s*Single/i, '').replace(/\(.*?\)|\[.*?\]/g, '').trim();
-                const aRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanArtist + ' ' + cleanAlbum)}&entity=album&limit=3`, {
-                    signal: AbortSignal.timeout(4000)
-                });
-                if (aRes.ok) {
-                    const aData = await aRes.json();
-                    for (const item of aData.results || []) {
-                        if (item.collectionViewUrl) candidateUrls.add(item.collectionViewUrl);
-                        if (!itunesCoverArt && item.artworkUrl100) {
-                            itunesCoverArt = item.artworkUrl100.replace('100x100bb.jpg', '1000x1000bb.jpg');
-                        }
-                    }
-                }
-            } catch {}
-        }
-
-        // 2. Search song entity
-        try {
-            const sRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanArtist + ' ' + cleanTitle)}&entity=song&limit=5`, {
+        for (const query of queries) {
+            const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`, {
                 signal: AbortSignal.timeout(4000)
             });
-            if (sRes.ok) {
-                const sData = await sRes.json();
-                for (const item of sData.results || []) {
-                    if (item.collectionViewUrl) candidateUrls.add(item.collectionViewUrl);
-                    if (!itunesCoverArt && item.artworkUrl100) {
-                        itunesCoverArt = item.artworkUrl100.replace('100x100bb.jpg', '1000x1000bb.jpg');
-                    }
+            if (res.ok) {
+                const data = await res.json();
+                if (data.results && data.results.length > 0) {
+                    const item = data.results[0];
+                    const cover = item.artworkUrl100 ? item.artworkUrl100.replace('100x100bb.jpg', '600x600bb.jpg') : '';
+                    return {
+                        album: item.collectionName || '',
+                        coverArt: cover,
+                        duration: item.trackTimeMillis || 0
+                    };
                 }
             }
-        } catch {}
-
-        // 3. Scrape candidate album pages for Apple Music motion HLS (.m3u8) streams
-        let videoUrl = null;
-        let videoTallUrl = null;
-
-        for (const pageUrl of candidateUrls) {
-            try {
-                const pageRes = await fetch(pageUrl, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-                    },
-                    signal: AbortSignal.timeout(4000)
-                });
-                if (pageRes.ok) {
-                    const html = await pageRes.text();
-                    const matches = html.match(/https:\/\/mvod\.itunes\.apple\.com\/[^\s"']+\.m3u8[^\s"']*/g) || [];
-                    const unique = [...new Set(matches)];
-                    if (unique.length > 0) {
-                        videoUrl = unique[0];
-                        videoTallUrl = unique.length > 1 ? unique[1] : unique[0];
-                        console.log(`[Main Process] Found Apple Music motion HLS stream: ${videoUrl}`);
-                        break;
-                    }
-                }
-            } catch {}
         }
-
-        return {
-            coverArt: itunesCoverArt,
-            videoUrl: videoUrl,
-            videoTallUrl: videoTallUrl
-        };
-    } catch (err) {
-        console.warn('[Main Process] Error resolving Apple Music artwork/motion:', err);
-    }
+    } catch {}
     return null;
+}
+
+async function resolveTrackIdFromSpotify(title, artist, explicitToken) {
+    const meta = await resolveTrackMetadataFromSpotify(title, artist, explicitToken);
+    return meta?.id || null;
 }
 
 // Embed the WebSocket Bridge and Canvas API inside the Electron Main Process!
@@ -490,255 +475,184 @@ function startWebSocketServer() {
             return;
         }
 
+        if (reqUrl.pathname === '/api/resolve-track') {
+            const title = reqUrl.searchParams.get('title') || '';
+            const artist = reqUrl.searchParams.get('artist') || '';
+            const token = reqUrl.searchParams.get('token') || undefined;
+
+            let meta = await resolveTrackMetadataFromSpotify(title, artist, token);
+            if (!meta || !meta.coverArt) {
+                const itunesMeta = await resolveMetadataFromITunes(title, artist);
+                if (itunesMeta) {
+                    meta = {
+                        id: meta?.id || null,
+                        album: meta?.album || itunesMeta.album || '',
+                        coverArt: itunesMeta.coverArt || meta?.coverArt || '',
+                        duration: meta?.duration || itunesMeta.duration || 0
+                    };
+                }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ data: meta || {} }));
+            return;
+        }
+
         res.writeHead(404);
         res.end();
     });
 
     io = new Server(server, {
-        maxHttpBufferSize: 1e6, // 1 MB packet limit to prevent memory exhaustion
         cors: {
             origin: "*",
             methods: ["GET", "POST"]
         }
     });
 
-    function sanitizeSongPayload(data) {
-        if (!data || typeof data !== 'object') return null;
-        return {
-            id: typeof data.id === 'string' ? data.id.slice(0, 100) : null,
-            title: typeof data.title === 'string' ? data.title.slice(0, 500) : 'No song playing',
-            artist: typeof data.artist === 'string' ? data.artist.slice(0, 500) : '',
-            album: typeof data.album === 'string' ? data.album.slice(0, 500) : '',
-            coverArt: typeof data.coverArt === 'string' && data.coverArt.length <= 2 * 1024 * 1024 ? data.coverArt : '',
-            duration: typeof data.duration === 'number' && !isNaN(data.duration) ? data.duration : 0,
-            progress: typeof data.progress === 'number' && !isNaN(data.progress) ? data.progress : 0,
-            isPlaying: Boolean(data.isPlaying),
-            source: typeof data.source === 'string' ? data.source.slice(0, 50) : 'spotify',
-            canvasUrl: typeof data.canvasUrl === 'string' && data.canvasUrl.length <= 2000 ? data.canvasUrl : null,
-            isExplicit: Boolean(data.isExplicit),
-            videoId: typeof data.videoId === 'string' ? data.videoId.slice(0, 100) : undefined,
-            _origin: typeof data._origin === 'string' ? data._origin : undefined,
-            appId: typeof data.appId === 'string' ? data.appId.slice(0, 200) : undefined,
-            spotifyToken: typeof data.spotifyToken === 'string' && data.spotifyToken.length <= 4096 ? data.spotifyToken : undefined
-        };
-    }
-
-    function sanitizeCanvasPayload(data) {
-        if (!data || typeof data !== 'object') return null;
-        return {
-            trackId: typeof data.trackId === 'string' ? data.trackId.slice(0, 100) : undefined,
-            canvasUrl: typeof data.canvasUrl === 'string' && data.canvasUrl.length <= 2000 ? data.canvasUrl : null,
-            spotifyToken: typeof data.spotifyToken === 'string' && data.spotifyToken.length <= 4096 ? data.spotifyToken : undefined,
-            title: typeof data.title === 'string' ? data.title.slice(0, 500) : undefined,
-            artist: typeof data.artist === 'string' ? data.artist.slice(0, 500) : undefined,
-            coverArt: typeof data.coverArt === 'string' && data.coverArt.length <= 2 * 1024 * 1024 ? data.coverArt : undefined
-        };
-    }
-
-    function sanitizeAnimatedArtworkPayload(data) {
-        if (!data || typeof data !== 'object') return null;
-        return {
-            source: typeof data.source === 'string' ? data.source.slice(0, 50) : 'apple_music',
-            videoUrl: typeof data.videoUrl === 'string' && data.videoUrl.length <= 2000 ? data.videoUrl : null,
-            videoTallUrl: typeof data.videoTallUrl === 'string' && data.videoTallUrl.length <= 2000 ? data.videoTallUrl : null,
-            previewUrl: typeof data.previewUrl === 'string' && data.previewUrl.length <= 2 * 1024 * 1024 ? data.previewUrl : null,
-            title: typeof data.title === 'string' ? data.title.slice(0, 500) : undefined,
-            artist: typeof data.artist === 'string' ? data.artist.slice(0, 500) : undefined
-        };
-    }
-
     let currentClients = 0;
-    let lastSongData = null;
     let lastExtensionTimestamp = 0;
 
-    // Listen for native Windows desktop playback events (Spotify Desktop, Apple Music for Windows, iTunes)
-    windowsMediaService.on('song_update', (data) => {
-        // If extension is actively playing or updated recently, don't let desktop SMTC hijack
-        const isExtActive = lastSongData && lastSongData._origin === 'extension' && (Date.now() - lastExtensionTimestamp < 3500);
-        if (isExtActive) {
-            if (lastSongData.isPlaying || !data.isPlaying) {
-                return;
-            }
-        }
+function isBrowserAppId(appId) {
+    if (!appId || typeof appId !== 'string') return false;
+    const lower = appId.toLowerCase();
+    return lower.includes('chrome') ||
+           lower.includes('msedge') ||
+           lower.includes('edge') ||
+           lower.includes('brave') ||
+           lower.includes('firefox') ||
+           lower.includes('opera') ||
+           lower.includes('vivaldi') ||
+           lower.includes('arc') ||
+           lower.includes('browser');
+}
 
+    // Listen for native Windows desktop playback events (Spotify Desktop, Apple Music for Windows, iTunes)
+    windowsMediaService.on('song_update', async (data) => {
+        if (isBrowserAppId(data.appId)) {
+            console.log(`[WindowsMedia] Skipped browser SMTC session (${data.appId}) for "${data.title}" - Web Extension handles browser playback.`);
+            return;
+        }
         console.log(`[WindowsMedia] Song: "${data.title}" by "${data.artist}" (${data.source}, playing: ${data.isPlaying})`);
-        const isNewTrack = !lastSongData || (lastSongData.title !== data.title || lastSongData.artist !== data.artist);
+        const isNewTrack = !lastDesktopSong || (lastDesktopSong.title !== data.title || lastDesktopSong.artist !== data.artist);
         let cleanProgress = data.progress || 0;
         if (isNewTrack && cleanProgress > 3000) {
             cleanProgress = 0;
         }
 
+        const token = await getAccessTokenFromSpDc();
+
+        // Sanitize incoming coverArt to strictly string
+        let safeCoverArt = '';
+        if (typeof data.coverArt === 'string') {
+            safeCoverArt = data.coverArt;
+        } else if (Array.isArray(data.coverArt)) {
+            safeCoverArt = data.coverArt.find(item => typeof item === 'string' && item.length > 0) || '';
+        }
+
         const songPayload = {
-            id: isNewTrack ? null : (lastSongData?.id || null),
+            id: isNewTrack ? null : (lastDesktopSong?.id || lastSongData?.id || null),
             title: data.title,
             artist: data.artist,
-            album: data.album,
-            coverArt: data.coverArt || (!isNewTrack ? (lastSongData?.coverArt || '') : ''),
-            duration: data.duration,
+            album: data.album || (!isNewTrack ? (lastDesktopSong?.album || lastSongData?.album || '') : ''),
+            coverArt: safeCoverArt || (!isNewTrack && typeof lastDesktopSong?.coverArt === 'string' ? lastDesktopSong.coverArt : ''),
+            duration: data.duration || (!isNewTrack ? (lastDesktopSong?.duration || 0) : 0),
             progress: cleanProgress,
             isPlaying: data.isPlaying,
             source: data.source,
-            canvasUrl: isNewTrack ? null : (lastSongData?.canvasUrl || null),
+            spotifyToken: token || latestWebPlayerToken || activeSpDcToken || undefined,
+            canvasUrl: isNewTrack ? null : (lastDesktopSong?.canvasUrl || lastSongData?.canvasUrl || null),
             _origin: 'windows_media',
             appId: data.appId
         };
+        lastDesktopSong = songPayload;
         lastSongData = songPayload;
         io.emit('song_update', songPayload);
 
-        // Proactively enrich metadata, thumbnail, and animated artwork for desktop playback
+        // Proactively resolve rich metadata (Spotify ID, Cover Art, Album, Canvas) in background
         if (data.title && data.title !== 'No song playing') {
             (async () => {
-                const currentTrackKey = `${data.source}::${data.title}::${data.artist}`;
                 try {
-                    if (data.source === 'spotify') {
-                        const token = await getAccessTokenFromSpDc();
-                        const spotifyResult = await resolveSpotifyTrackAndArtwork(data.title, data.artist, token);
+                    let meta = await resolveTrackMetadataFromSpotify(data.title, data.artist, token);
 
-                        // If song changed while resolving, abort
-                        if (!lastSongData || `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` !== currentTrackKey) {
-                            return;
+                    // Fallback to iTunes API if coverArt or album is missing (e.g. Apple Music or unindexed track)
+                    if (!meta || !meta.coverArt) {
+                        const itunesMeta = await resolveMetadataFromITunes(data.title, data.artist);
+                        if (itunesMeta) {
+                            meta = {
+                                id: meta?.id || null,
+                                album: meta?.album || itunesMeta.album || data.album,
+                                coverArt: itunesMeta.coverArt || meta?.coverArt || '',
+                                duration: meta?.duration || itunesMeta.duration || data.duration
+                            };
+                        }
+                    }
+
+                    if (meta && lastDesktopSong && lastDesktopSong.title === data.title) {
+                        let hasUpdates = false;
+                        if (meta.id && lastDesktopSong.id !== meta.id) {
+                            lastDesktopSong.id = meta.id;
+                            hasUpdates = true;
+                        }
+                        const curCover = typeof lastDesktopSong.coverArt === 'string' ? lastDesktopSong.coverArt : '';
+                        if (meta.coverArt && (!curCover || curCover.startsWith('data:image/jpeg;base64,'))) {
+                            // Replace empty or low-res SMTC thumbnail with crisp 640x640 album artwork
+                            lastDesktopSong.coverArt = meta.coverArt;
+                            hasUpdates = true;
+                        }
+                        if (meta.album && !lastDesktopSong.album) {
+                            lastDesktopSong.album = meta.album;
+                            hasUpdates = true;
+                        }
+                        if (meta.duration && (!lastDesktopSong.duration || lastDesktopSong.duration === 0)) {
+                            lastDesktopSong.duration = meta.duration;
+                            hasUpdates = true;
                         }
 
-                        let trackId = null;
-                        if (spotifyResult) {
-                            trackId = spotifyResult.id;
-                            lastSongData.id = trackId;
-
-                            // If coverArt was empty or missing from SMTC, enrich immediately with Spotify high-res coverArt
-                            if (!lastSongData.coverArt && spotifyResult.coverArt) {
-                                lastSongData.coverArt = spotifyResult.coverArt;
-                                io.emit('song_update', lastSongData);
-                            }
+                        if (hasUpdates) {
+                            console.log(`[Main Process] Enriched desktop track metadata for "${data.title}": ID=${meta.id}, CoverArt=${Boolean(meta.coverArt)}`);
+                            io.emit('song_update', {
+                                ...lastDesktopSong,
+                                spotifyToken: token || activeSpDcToken || undefined
+                            });
                         }
 
-                        // Try Priority 1: Spotify Canvas
-                        let canvasFound = false;
-                        if (trackId) {
-                            const canvasUrl = await resolveCanvasForTrack(trackId, token);
-                            if (lastSongData && `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` === currentTrackKey) {
-                                if (canvasUrl) {
-                                    canvasFound = true;
-                                    lastSongData.canvasUrl = canvasUrl;
-                                    lastSongData.id = trackId;
-                                    io.emit('canvas_update', sanitizeCanvasPayload({
-                                        trackId: trackId,
-                                        canvasUrl: canvasUrl,
-                                        title: data.title,
-                                        artist: data.artist,
-                                        coverArt: lastSongData.coverArt,
-                                        spotifyToken: token || activeSpDcToken
-                                    }));
-                                }
-                            }
-                        }
-
-                        // Priority 2: If Spotify Canvas is not present, fall back to Apple Music motion artwork
-                        if (!canvasFound && lastSongData && `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` === currentTrackKey) {
-                            const appleMeta = await resolveAppleMusicArtworkAndMotion(data.title, data.artist, data.album);
-                            if (lastSongData && `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` === currentTrackKey) {
-                                if (appleMeta) {
-                                    if (!lastSongData.coverArt && appleMeta.coverArt) {
-                                        lastSongData.coverArt = appleMeta.coverArt;
-                                        io.emit('song_update', lastSongData);
-                                    }
-                                    if (appleMeta.videoUrl) {
-                                        io.emit('animated_artwork_update', sanitizeAnimatedArtworkPayload({
-                                            source: 'apple_music',
-                                            videoUrl: appleMeta.videoUrl,
-                                            videoTallUrl: appleMeta.videoTallUrl || appleMeta.videoUrl,
-                                            previewUrl: lastSongData.coverArt || appleMeta.coverArt,
-                                            title: data.title,
-                                            artist: data.artist
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                    } else if (data.source === 'apple') {
-                        // Priority 1: Apple Music motion artwork & high-res iTunes coverArt
-                        const appleMeta = await resolveAppleMusicArtworkAndMotion(data.title, data.artist, data.album);
-                        if (!lastSongData || `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` !== currentTrackKey) {
-                            return;
-                        }
-
-                        let motionFound = false;
-                        if (appleMeta) {
-                            if (!lastSongData.coverArt && appleMeta.coverArt) {
-                                lastSongData.coverArt = appleMeta.coverArt;
-                                io.emit('song_update', lastSongData);
-                            }
-                            if (appleMeta.videoUrl) {
-                                motionFound = true;
-                                io.emit('animated_artwork_update', sanitizeAnimatedArtworkPayload({
-                                    source: 'apple_music',
-                                    videoUrl: appleMeta.videoUrl,
-                                    videoTallUrl: appleMeta.videoTallUrl || appleMeta.videoUrl,
-                                    previewUrl: lastSongData.coverArt || appleMeta.coverArt,
-                                    title: data.title,
-                                    artist: data.artist
-                                }));
-                            }
-                        }
-
-                        // Priority 2: If Apple Music has no motion artwork, fall back to Spotify Canvas
-                        if (!motionFound && lastSongData && `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` === currentTrackKey) {
-                            const token = await getAccessTokenFromSpDc();
-                            const spotifyResult = await resolveSpotifyTrackAndArtwork(data.title, data.artist, token);
-                            if (spotifyResult && spotifyResult.id) {
-                                lastSongData.id = spotifyResult.id;
-                                if (!lastSongData.coverArt && spotifyResult.coverArt) {
-                                    lastSongData.coverArt = spotifyResult.coverArt;
-                                    io.emit('song_update', lastSongData);
-                                }
-                                const canvasUrl = await resolveCanvasForTrack(spotifyResult.id, token);
-                                if (canvasUrl && lastSongData && `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` === currentTrackKey) {
-                                    lastSongData.canvasUrl = canvasUrl;
-                                    io.emit('canvas_update', sanitizeCanvasPayload({
-                                        trackId: spotifyResult.id,
-                                        canvasUrl: canvasUrl,
-                                        title: data.title,
-                                        artist: data.artist,
-                                        coverArt: lastSongData.coverArt,
-                                        spotifyToken: token || activeSpDcToken
-                                    }));
-                                }
-                            }
-                        }
-                    } else {
-                        // Any other desktop player: resolve cover art from iTunes so thumbnail is never empty
-                        if (!lastSongData.coverArt) {
-                            const appleMeta = await resolveAppleMusicArtworkAndMotion(data.title, data.artist, data.album);
-                            if (appleMeta?.coverArt && lastSongData && `${lastSongData.source}::${lastSongData.title}::${lastSongData.artist}` === currentTrackKey) {
-                                lastSongData.coverArt = appleMeta.coverArt;
-                                io.emit('song_update', lastSongData);
+                        // Also resolve Spotify Canvas if track ID exists
+                        if (meta.id) {
+                            const canvasUrl = await resolveCanvasForTrack(meta.id, token);
+                            if (canvasUrl && lastDesktopSong && lastDesktopSong.title === data.title) {
+                                lastDesktopSong.canvasUrl = canvasUrl;
+                                io.emit('canvas_update', {
+                                    trackId: meta.id,
+                                    canvasUrl: canvasUrl,
+                                    spotifyToken: token || activeSpDcToken || undefined,
+                                    _origin: 'windows_media'
+                                });
                             }
                         }
                     }
                 } catch (err) {
-                    console.warn('[Main Process] Proactive desktop metadata/artwork resolution error:', err);
+                    console.warn('[Main Process] Proactive SMTC metadata resolution error:', err);
                 }
             })();
         }
     });
 
     windowsMediaService.on('progress_update', (data) => {
-        // If extension is active, SMTC must NEVER emit competing progress updates
-        const isExtActive = lastSongData && lastSongData._origin === 'extension' && (Date.now() - lastExtensionTimestamp < 3500);
-        if (isExtActive) {
+        if (isBrowserAppId(data.appId)) {
             return;
         }
-
-        if (lastSongData && (!lastSongData.source || lastSongData.source === data.source || lastSongData._origin === 'windows_media' || data.isPlaying)) {
-            lastSongData.progress = data.progress;
-            lastSongData.isPlaying = data.isPlaying;
-            if (data.duration) lastSongData.duration = data.duration;
+        if (lastDesktopSong) {
+            lastDesktopSong.progress = data.progress;
+            lastDesktopSong.isPlaying = data.isPlaying;
+            if (data.duration) lastDesktopSong.duration = data.duration;
         }
+
         io.emit('progress_update', {
             source: data.source,
             title: data.title,
             duration: data.duration,
             progress: data.progress,
-            isPlaying: data.isPlaying
+            isPlaying: data.isPlaying,
+            _origin: 'windows_media'
         });
     });
 
@@ -757,74 +671,102 @@ function startWebSocketServer() {
             });
         }
 
-        // If we have a cached song, send it to the new client immediately
-        if (lastSongData) {
+        // If we have a cached song for current sourceMode, send it
+        const currentCached = currentSourceMode === 'desktop' ? lastDesktopSong : lastExtensionSong;
+        if (currentCached) {
+            socket.emit('song_update', currentCached);
+        } else if (lastSongData) {
             socket.emit('song_update', lastSongData);
         }
 
+        socket.on('switch_source_mode', (mode) => {
+            handleSourceSwitch(mode);
+        });
+
+        socket.on('request_source_playback', (mode) => {
+            handleSourceSwitch(mode);
+        });
+
+        socket.on('music_command', (data) => {
+            const action = typeof data === 'string' ? data : data?.action;
+            if (action) {
+                handleMusicCommand(action);
+            }
+        });
+
         // Receive from Browser Extension...
-        socket.on('song_update', async (raw) => {
-            const data = sanitizeSongPayload(raw);
-            if (!data) return;
+        socket.on('song_update', async (data) => {
             lastExtensionTimestamp = Date.now();
             data._origin = 'extension';
+            lastExtensionSong = data;
             lastSongData = data;
             if (data.spotifyToken) {
                 latestWebPlayerToken = data.spotifyToken;
             }
-            // Broadcast to the React App (which is also connected to this socket server)
-            socket.broadcast.emit('song_update', data);
+            // Always emit song_update tagged with _origin = 'extension' to all clients
+            io.emit('song_update', data);
 
             // Proactively resolve canvas if not already present
-            if (data.id && !data.canvasUrl && (data.spotifyToken || latestWebPlayerToken || process.env.SP_DC || process.env.VITE_SPOTIFY_SP_DC)) {
-                resolveCanvasForTrack(data.id, data.spotifyToken).then((canvasUrl) => {
-                    if (canvasUrl && lastSongData && lastSongData.id === data.id) {
-                        lastSongData.canvasUrl = canvasUrl;
+            const activeToken = data.spotifyToken || latestWebPlayerToken || activeSpDcToken;
+            if (data.id && !data.canvasUrl && activeToken) {
+                resolveCanvasForTrack(data.id, activeToken).then((canvasUrl) => {
+                    if (canvasUrl && lastExtensionSong && lastExtensionSong.id === data.id) {
+                        lastExtensionSong.canvasUrl = canvasUrl;
                         io.emit('canvas_update', {
                             trackId: data.id,
                             canvasUrl: canvasUrl,
-                            spotifyToken: data.spotifyToken || latestWebPlayerToken || activeSpDcToken
+                            spotifyToken: activeToken,
+                            _origin: 'extension'
+                        });
+                    }
+                });
+            } else if (!data.id && data.title && data.artist && activeToken) {
+                // If browser extension didn't capture track ID, resolve in background via Spotify catalog
+                resolveTrackIdFromSpotify(data.title, data.artist, activeToken).then((resolvedId) => {
+                    if (resolvedId && lastExtensionSong && lastExtensionSong.title === data.title) {
+                        lastExtensionSong.id = resolvedId;
+                        resolveCanvasForTrack(resolvedId, activeToken).then((canvasUrl) => {
+                            if (canvasUrl && lastExtensionSong && lastExtensionSong.title === data.title) {
+                                lastExtensionSong.canvasUrl = canvasUrl;
+                            }
+                            io.emit('canvas_update', {
+                                trackId: resolvedId,
+                                canvasUrl: canvasUrl || null,
+                                spotifyToken: activeToken,
+                                _origin: 'extension'
+                            });
                         });
                     }
                 });
             }
         });
 
-        socket.on('canvas_update', (raw) => {
-            const data = sanitizeCanvasPayload(raw);
-            if (!data) return;
+        socket.on('canvas_update', (data) => {
+            data._origin = 'extension';
             if (data.spotifyToken) {
                 latestWebPlayerToken = data.spotifyToken;
             }
             if (lastSongData && data.trackId && (lastSongData.id === data.trackId || !lastSongData.canvasUrl)) {
                 lastSongData.canvasUrl = data.canvasUrl;
             }
-            socket.broadcast.emit('canvas_update', data);
+            if (lastExtensionSong && data.trackId && (lastExtensionSong.id === data.trackId || !lastExtensionSong.canvasUrl)) {
+                lastExtensionSong.canvasUrl = data.canvasUrl;
+            }
+            io.emit('canvas_update', data);
         });
 
         socket.on('progress_update', (data) => {
-            if (!data || typeof data !== 'object') return;
             lastExtensionTimestamp = Date.now();
-            const safeData = {
-                source: typeof data.source === 'string' ? data.source.slice(0, 50) : undefined,
-                title: typeof data.title === 'string' ? data.title.slice(0, 500) : undefined,
-                duration: typeof data.duration === 'number' && !isNaN(data.duration) ? data.duration : undefined,
-                progress: typeof data.progress === 'number' && !isNaN(data.progress) ? data.progress : 0,
-                isPlaying: Boolean(data.isPlaying),
-                _origin: 'extension'
-            };
-            if (lastSongData) {
-                if (!safeData.source || !lastSongData.source || safeData.source === lastSongData.source || safeData.isPlaying) {
-                    lastSongData.progress = safeData.progress;
-                    lastSongData.isPlaying = safeData.isPlaying;
-                    lastSongData._origin = 'extension';
-                }
+            data._origin = 'extension';
+            if (lastExtensionSong) {
+                lastExtensionSong.progress = data.progress;
+                lastExtensionSong.isPlaying = data.isPlaying;
             }
-            socket.broadcast.emit('progress_update', safeData);
+            io.emit('progress_update', data);
         });
 
         socket.on('disconnect', () => {
-            currentClients = Math.max(0, currentClients - 1);
+            currentClients--;
         });
     });
 
@@ -876,7 +818,16 @@ function createWindow() {
         }
     });
 
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        // Forward warnings and errors from renderer console to terminal
+        if (level >= 2 || message.includes('Error') || message.includes('[App]') || message.includes('uncaught')) {
+            console.log(`[Renderer] ${message}`);
+        }
+    });
+
+    mainWindow.webContents.on('render-process-gone', (event, details) => {
+        console.error('[Main Process] Renderer process crashed / gone:', details);
+    });
 
     // Handle links opened from the renderer in external default browser
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -923,16 +874,36 @@ ipcMain.on('window-pin', (event, isPinned) => {
     if (mainWindow) mainWindow.setAlwaysOnTop(Boolean(isPinned), 'screen-saver');
 });
 
-// Music control commands: forward to connected browser extensions and native Windows SMTC
-ipcMain.on('music-command', (event, command) => {
-    console.log(`[Main] Music command received: ${command}`);
-    // Forward command to Windows native SMTC (controls Spotify desktop, Apple Music for Windows, iTunes)
-    windowsMediaService.sendCommand(command);
+ipcMain.on('switch-source', (event, mode) => {
+    handleSourceSwitch(mode);
+});
 
-    if (io) {
-        io.emit('music_command', { action: command });
-        console.log(`[Main] Command broadcasted via WebSocket: ${command}`);
+let lastMusicCommandTime = 0;
+let lastMusicCommandName = '';
+
+function handleMusicCommand(command) {
+    const now = Date.now();
+    if (command === lastMusicCommandName && now - lastMusicCommandTime < 150) {
+        console.log(`[Main] Debounced rapid duplicate music command: ${command}`);
+        return;
     }
+    lastMusicCommandTime = now;
+    lastMusicCommandName = command;
+
+    console.log(`[Main] Music command received: ${command} (Source: ${currentSourceMode})`);
+    if (currentSourceMode === 'desktop') {
+        windowsMediaService.sendCommand(command);
+    } else if (currentSourceMode === 'web') {
+        if (io) io.emit('music_command', { action: command });
+    } else {
+        windowsMediaService.sendCommand(command);
+        if (io) io.emit('music_command', { action: command });
+    }
+}
+
+// Music control commands: forward to active playback source
+ipcMain.on('music-command', (event, command) => {
+    handleMusicCommand(command);
 });
 
 ipcMain.on('window-resize', (event, { direction, deltaX, deltaY }) => {

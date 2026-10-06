@@ -12,11 +12,19 @@ export interface LyricsAttribution {
     uploader?: Contributor;
 }
 
+export interface Letter {
+    letter: string;
+    startTimeMs: number;
+    endTimeMs: number;
+}
+
 export interface Word {
     word: string;
+    transliteratedWord?: string;
     startTimeMs: number;
     endTimeMs: number;
     isPartOfWord?: boolean;
+    letters?: Letter[];
 }
 
 export interface InstrumentalDot {
@@ -53,11 +61,6 @@ const SPICY_LYRICS_API_KEY = (
 // Bounded cache for resolved Spotify track IDs (artist::title -> spotifyTrackId)
 const MAX_TRACK_ID_CACHE = 200;
 const trackIdCache = new Map<string, string | null>();
-const inflightTrackResolutions = new Map<string, Promise<string | null>>();
-
-// Resource exhaustion safety limits
-const MAX_LYRICS_LINES = 1000;
-const MAX_LINE_LENGTH = 1000;
 
 function setTrackIdCache(key: string, id: string | null): void {
     if (trackIdCache.size >= MAX_TRACK_ID_CACHE) {
@@ -70,7 +73,13 @@ function setTrackIdCache(key: string, id: string | null): void {
 // Cache for anonymous Spotify session token
 let cachedSpotifyToken: string | null = null;
 let spotifyTokenExpiresAt = 0;
-let inflightSpotifyTokenPromise: Promise<string | null> | null = null;
+let sharedUserToken: string | null = null;
+
+export function setLyricsUserToken(token: string | null): void {
+    if (token && typeof token === 'string') {
+        sharedUserToken = token;
+    }
+}
 
 // Spotify Web Player search GraphQL constants
 const SEARCH_OPERATION = 'searchDesktop';
@@ -177,46 +186,36 @@ export async function getAnonymousSpotifyToken(signal?: AbortSignal): Promise<st
         return cachedSpotifyToken;
     }
 
-    if (inflightSpotifyTokenPromise) {
-        return inflightSpotifyTokenPromise;
-    }
+    try {
+        const bootstrapTrackId = '4uLU6hMCjMI75M1A2tKUQC';
+        const res = await fetchSafe(
+            `https://open.spotify.com/embed/track/${bootstrapTrackId}`,
+            `/api/spotify-embed/embed/track/${bootstrapTrackId}`,
+            { signal: signal || AbortSignal.timeout(5000) }
+        );
 
-    inflightSpotifyTokenPromise = (async () => {
-        try {
-            const bootstrapTrackId = '4uLU6hMCjMI75M1A2tKUQC';
-            const res = await fetchSafe(
-                `https://open.spotify.com/embed/track/${bootstrapTrackId}`,
-                `/api/spotify-embed/embed/track/${bootstrapTrackId}`,
-                { signal: signal || AbortSignal.timeout(5000) }
-            );
-
-            if (!res.ok) {
-                console.warn(`[SpicyLyrics] Spotify embed token request failed: ${res.status}`);
-                return null;
-            }
-
-            const html = await res.text();
-            const match = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>(.*?)<\/script>/s);
-            if (!match) return null;
-
-            const json = JSON.parse(match[1]);
-            const session = json?.props?.pageProps?.state?.settings?.session;
-            if (!session?.accessToken) return null;
-
-            cachedSpotifyToken = session.accessToken;
-            spotifyTokenExpiresAt = session.accessTokenExpirationTimestampMs || (now + 3600 * 1000);
-            return cachedSpotifyToken;
-        } catch (err) {
-            if ((err as Error)?.name !== 'AbortError') {
-                console.error('[SpicyLyrics] Failed to retrieve anonymous Spotify token:', err);
-            }
+        if (!res.ok) {
+            console.warn(`[SpicyLyrics] Spotify embed token request failed: ${res.status}`);
             return null;
-        } finally {
-            inflightSpotifyTokenPromise = null;
         }
-    })();
 
-    return inflightSpotifyTokenPromise;
+        const html = await res.text();
+        const match = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>(.*?)<\/script>/s);
+        if (!match) return null;
+
+        const json = JSON.parse(match[1]);
+        const session = json?.props?.pageProps?.state?.settings?.session;
+        if (!session?.accessToken) return null;
+
+        cachedSpotifyToken = session.accessToken;
+        spotifyTokenExpiresAt = session.accessTokenExpirationTimestampMs || (now + 3600 * 1000);
+        return cachedSpotifyToken;
+    } catch (err) {
+        if ((err as Error)?.name !== 'AbortError') {
+            console.error('[SpicyLyrics] Failed to retrieve anonymous Spotify token:', err);
+        }
+        return null;
+    }
 }
 
 interface SpotifyGraphQLTrack {
@@ -225,7 +224,7 @@ interface SpotifyGraphQLTrack {
     durationMs?: number;
 }
 
-async function executeSpotifyGraphQLSearch(token: string, queryStr: string, signal?: AbortSignal): Promise<{ status: number; tracks: SpotifyGraphQLTrack[] }> {
+async function executeSpotifyGraphQLSearch(token: string, queryStr: string): Promise<{ status: number; tracks: SpotifyGraphQLTrack[] }> {
     try {
         const variables = JSON.stringify({
             searchTerm: queryStr,
@@ -253,8 +252,7 @@ async function executeSpotifyGraphQLSearch(token: string, queryStr: string, sign
                 headers: {
                     Authorization: `Bearer ${token}`,
                     'app-platform': 'WebPlayer'
-                },
-                signal
+                }
             }
         );
 
@@ -309,99 +307,130 @@ export async function resolveSpotifyTrackId(
         return trackIdCache.get(cacheKey) || null;
     }
 
-    if (inflightTrackResolutions.has(cacheKey)) {
-        return inflightTrackResolutions.get(cacheKey)!;
+    // 1. Try local bridge server first (direct SP_DC / iTunes authenticated resolution in Node main process)
+    try {
+        const bridgeUrl = `http://localhost:4000/api/resolve-track?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(cleanArtist)}`;
+        const bridgeRes = await fetch(bridgeUrl, { signal: signal ? signal : AbortSignal.timeout(3000) });
+        if (bridgeRes.ok) {
+            const bridgeJson = await bridgeRes.json();
+            if (bridgeJson?.data?.id) {
+                setTrackIdCache(cacheKey, bridgeJson.data.id);
+                return bridgeJson.data.id;
+            }
+        }
+    } catch {
+        // Bridge service not available or timed out, continue to token search
     }
 
-    const resolutionPromise = (async (): Promise<string | null> => {
-        try {
-            let token = await getAnonymousSpotifyToken(signal);
-            if (!token || signal?.aborted) return null;
+    // 2. Try shared user token or anonymous token
+    let token = sharedUserToken || await getAnonymousSpotifyToken(signal);
+    if (!token) return null;
 
-            const query = `${cleanArtist} ${cleanTitle}`.trim();
-            let searchResult = await executeSpotifyGraphQLSearch(token, query, signal);
+    try {
+        const query = `${cleanArtist} ${cleanTitle}`.trim();
+        let searchResult = await executeSpotifyGraphQLSearch(token, query);
 
-            if (searchResult.status === 401 && !signal?.aborted) {
-                cachedSpotifyToken = null;
-                token = await getAnonymousSpotifyToken(signal);
-                if (token && !signal?.aborted) {
-                    searchResult = await executeSpotifyGraphQLSearch(token, query, signal);
-                }
+        if (searchResult.status === 401) {
+            cachedSpotifyToken = null;
+            sharedUserToken = null;
+            token = await getAnonymousSpotifyToken(signal);
+            if (token) {
+                searchResult = await executeSpotifyGraphQLSearch(token, query);
             }
-
-            if (!token || signal?.aborted) return null;
-            let tracks = searchResult.tracks;
-
-            // Try primary artist if multiple artists present
-            if (tracks.length === 0 && !signal?.aborted) {
-                const primaryArtist = cleanArtist.split(/[,&/]|feat\.|ft\./i)[0].trim();
-                if (primaryArtist && primaryArtist !== cleanArtist) {
-                    const primaryResult = await executeSpotifyGraphQLSearch(token, `${primaryArtist} ${cleanTitle}`.trim(), signal);
-                    if (primaryResult.tracks.length > 0) tracks = primaryResult.tracks;
-                }
-            }
-
-            if (tracks.length === 0 && cleanAlbum && !signal?.aborted) {
-                const albumResult = await executeSpotifyGraphQLSearch(token, `${cleanTitle} ${cleanAlbum}`.trim(), signal);
-                if (albumResult.tracks.length > 0) tracks = albumResult.tracks;
-            }
-
-            if (tracks.length === 0 && !signal?.aborted) {
-                const titleResult = await executeSpotifyGraphQLSearch(token, cleanTitle, signal);
-                if (titleResult.tracks.length > 0) tracks = titleResult.tracks;
-            }
-
-            if (tracks.length === 0 && (title.trim() !== cleanTitle || artist.trim() !== cleanArtist) && !signal?.aborted) {
-                const rawResult = await executeSpotifyGraphQLSearch(token, `${artist.trim()} ${title.trim()}`.trim(), signal);
-                if (rawResult.tracks.length > 0) tracks = rawResult.tracks;
-            }
-
-            if (tracks.length === 0 || signal?.aborted) {
-                return null;
-            }
-
-            let bestMatch = tracks[0];
-            if (duration && duration > 0) {
-                const durationMatch = tracks.find(
-                    (item) => Math.abs((item.durationMs || 0) - duration) < 6000
-                );
-                if (durationMatch) bestMatch = durationMatch;
-            }
-
-            const resolvedId = bestMatch.id;
-            setTrackIdCache(cacheKey, resolvedId);
-            return resolvedId;
-        } catch (err) {
-            if ((err as Error)?.name !== 'AbortError') {
-                console.error('[SpicyLyrics] Error during Spotify track resolution:', err);
-            }
-            return null;
-        } finally {
-            inflightTrackResolutions.delete(cacheKey);
         }
-    })();
 
-    inflightTrackResolutions.set(cacheKey, resolutionPromise);
-    return resolutionPromise;
+        if (!token) return null;
+        let tracks = searchResult.tracks;
+
+        // Try primary artist if multiple artists present
+        if (tracks.length === 0) {
+            const primaryArtist = cleanArtist.split(/[,&/]|feat\.|ft\./i)[0].trim();
+            if (primaryArtist && primaryArtist !== cleanArtist) {
+                const primaryResult = await executeSpotifyGraphQLSearch(token, `${primaryArtist} ${cleanTitle}`.trim());
+                if (primaryResult.tracks.length > 0) tracks = primaryResult.tracks;
+            }
+        }
+
+        if (tracks.length === 0 && cleanAlbum) {
+            const albumResult = await executeSpotifyGraphQLSearch(token, `${cleanTitle} ${cleanAlbum}`.trim());
+            if (albumResult.tracks.length > 0) tracks = albumResult.tracks;
+        }
+
+        if (tracks.length === 0) {
+            const titleResult = await executeSpotifyGraphQLSearch(token, cleanTitle);
+            if (titleResult.tracks.length > 0) tracks = titleResult.tracks;
+        }
+
+        if (tracks.length === 0 && (title.trim() !== cleanTitle || artist.trim() !== cleanArtist)) {
+            const rawResult = await executeSpotifyGraphQLSearch(token, `${artist.trim()} ${title.trim()}`.trim());
+            if (rawResult.tracks.length > 0) tracks = rawResult.tracks;
+        }
+
+        if (tracks.length === 0) {
+            return null;
+        }
+
+        let bestMatch = tracks[0];
+        if (duration && duration > 0) {
+            const durationMatch = tracks.find(
+                (item) => Math.abs((item.durationMs || 0) - duration) < 6000
+            );
+            if (durationMatch) bestMatch = durationMatch;
+        }
+
+        const resolvedId = bestMatch.id;
+        setTrackIdCache(cacheKey, resolvedId);
+        return resolvedId;
+    } catch (err) {
+        console.error('[SpicyLyrics] Error during Spotify track resolution:', err);
+        return null;
+    }
 }
 
 interface RawSyllable {
     StartTime: number;
     EndTime: number;
     Text?: string;
+    TransliteratedText?: string;
     IsPartOfWord?: boolean;
 }
 
 /**
- * Reusable helper to parse syllable groups into timed words directly from API
+ * Reusable helper to parse syllable groups into timed words and letters
+ * Follows Spicy Lyrics 6.3.153 IsLetterCapable (duration >= 1000ms) and Emphasize (-250ms compensation)
  */
 function parseSyllableGroup(rawSyllables: RawSyllable[]): { syllables: Word[]; lineText: string } {
-    const syllables: Word[] = rawSyllables.map((s) => ({
-        word: s.Text || '',
-        startTimeMs: Math.round(s.StartTime * 1000),
-        endTimeMs: Math.round(s.EndTime * 1000),
-        isPartOfWord: s.IsPartOfWord === true
-    }));
+    const syllables: Word[] = rawSyllables.map((s) => {
+        const sStart = Math.round(s.StartTime * 1000);
+        const sEnd = Math.round(s.EndTime * 1000);
+        const text = s.Text || '';
+        const totalDuration = sEnd - sStart;
+
+        let letters: Letter[] | undefined;
+        // In Spicy Lyrics 6.3.153:
+        // IsLetterCapable: totalDuration >= 1000ms and letterLength > 0
+        // Emphasize: EndTime lead subtraction is 250ms (yielding effective vocal sustain)
+        const chars = Array.from(text);
+        if (totalDuration >= 1000 && chars.length > 0) {
+            const effectiveEnd = Math.max(sStart + 200, sEnd - 250);
+            const effectiveDuration = effectiveEnd - sStart;
+            const letterDuration = effectiveDuration / chars.length;
+            letters = chars.map((ch: string, idx: number) => ({
+                letter: ch,
+                startTimeMs: Math.round(sStart + idx * letterDuration),
+                endTimeMs: Math.round(sStart + (idx + 1) * letterDuration)
+            }));
+        }
+
+        return {
+            word: text,
+            transliteratedWord: s.TransliteratedText,
+            startTimeMs: sStart,
+            endTimeMs: sEnd,
+            isPartOfWord: s.IsPartOfWord === true,
+            letters
+        };
+    });
 
     let fullLineWords = '';
     for (let sIdx = 0; sIdx < syllables.length; sIdx++) {
@@ -419,7 +448,15 @@ function parseSyllableGroup(rawSyllables: RawSyllable[]): { syllables: Word[]; l
  * Sort chronologically, ensure end times, and insert 3-dot instrumental pauses
  */
 function processFlatLines(lines: LyricLine[]): LyricLine[] {
-    lines.sort((a, b) => a.startTimeMs - b.startTimeMs);
+    // Sort chronologically, prioritizing lead vocals over background vocals when timestamps tie
+    lines.sort((a, b) => {
+        if (a.startTimeMs !== b.startTimeMs) {
+            return a.startTimeMs - b.startTimeMs;
+        }
+        if (a.isBackground && !b.isBackground) return 1;
+        if (!a.isBackground && b.isBackground) return -1;
+        return 0;
+    });
 
     for (let i = 0; i < lines.length; i++) {
         if (!lines[i].endTimeMs || lines[i].endTimeMs <= lines[i].startTimeMs) {
@@ -562,7 +599,6 @@ export const lyricsProvider = {
 
             if (Array.isArray(content) && content.length > 0) {
                 for (const item of content) {
-                    if (rawLines.length >= MAX_LYRICS_LINES) break;
                     const isOpposite = item.OppositeAligned === true;
 
                     if (item.Type === 'Interlude') {
@@ -589,24 +625,23 @@ export const lyricsProvider = {
                     const lead = item.Lead;
                     if (lead && Array.isArray(lead.Syllables) && lead.Syllables.length > 0) {
                         hasSyllables = true;
-                        const lineStartMs = Math.round(lead.StartTime * 1000);
-                        const lineEndMs = Math.round(lead.EndTime * 1000);
+                        const lineStartMs = Math.round((lead.StartTime ?? item.StartTime ?? lead.Syllables[0]?.StartTime ?? 0) * 1000);
+                        const lineEndMs = Math.round((lead.EndTime ?? item.EndTime ?? lead.Syllables[lead.Syllables.length - 1]?.EndTime ?? 0) * 1000);
                         const { syllables, lineText } = parseSyllableGroup(lead.Syllables);
 
                         if (lineText) {
-                            const safeLineText = lineText.slice(0, MAX_LINE_LENGTH);
                             rawLines.push({
                                 startTimeMs: lineStartMs,
                                 endTimeMs: lineEndMs,
-                                words: safeLineText,
-                                text: safeLineText,
+                                words: lineText,
+                                text: lineText,
                                 isSyllable: true,
                                 syllables,
                                 isOppositeAligned: isOpposite
                             });
                         }
                     } else if (item.Text && item.Text.trim()) {
-                        const lineText = item.Text.trim().slice(0, MAX_LINE_LENGTH);
+                        const lineText = item.Text.trim();
                         rawLines.push({
                             startTimeMs: Math.round((item.StartTime ?? 0) * 1000),
                             endTimeMs: Math.round((item.EndTime ?? 0) * 1000),
@@ -620,34 +655,51 @@ export const lyricsProvider = {
                     // Background vocals
                     if (Array.isArray(item.Background) && item.Background.length > 0) {
                         for (const bg of item.Background) {
-                            if (rawLines.length >= MAX_LYRICS_LINES) break;
                             if (Array.isArray(bg.Syllables) && bg.Syllables.length > 0) {
                                 hasSyllables = true;
-                                const bgStartMs = Math.round(bg.StartTime * 1000);
-                                const bgEndMs = Math.round(bg.EndTime * 1000);
+                                const bgStartMs = Math.round((bg.StartTime ?? item.StartTime ?? bg.Syllables[0]?.StartTime ?? 0) * 1000);
+                                const bgEndMs = Math.round((bg.EndTime ?? item.EndTime ?? bg.Syllables[bg.Syllables.length - 1]?.EndTime ?? 0) * 1000);
                                 const { syllables, lineText: cleanBgText } = parseSyllableGroup(bg.Syllables);
 
                                 if (cleanBgText) {
-                                    const safeBgText = cleanBgText.slice(0, MAX_LINE_LENGTH);
+                                    const stripped = cleanBgText.replace(/[()]/g, '').trim();
+                                    const cleanSyllables = syllables.map((s) => ({
+                                        ...s,
+                                        word: s.word.replace(/[()]/g, ''),
+                                        letters: s.letters ? s.letters.filter((l) => l.letter !== '(' && l.letter !== ')') : undefined
+                                    }));
                                     rawLines.push({
                                         startTimeMs: bgStartMs,
                                         endTimeMs: bgEndMs,
-                                        words: `(${safeBgText})`,
-                                        text: `(${safeBgText})`,
+                                        words: stripped,
+                                        text: stripped,
                                         isSyllable: true,
-                                        syllables,
+                                        syllables: cleanSyllables,
                                         isBackground: true,
                                         isOppositeAligned: isOpposite
                                     });
                                 }
+                            } else if (bg.Text && bg.Text.trim()) {
+                                const cleanBgText = bg.Text.trim();
+                                const stripped = cleanBgText.replace(/[()]/g, '').trim();
+                                const bgStartMs = Math.round((bg.StartTime ?? item.StartTime ?? 0) * 1000);
+                                const bgEndMs = Math.round((bg.EndTime ?? item.EndTime ?? 0) * 1000);
+                                rawLines.push({
+                                    startTimeMs: bgStartMs,
+                                    endTimeMs: bgEndMs,
+                                    words: stripped,
+                                    text: stripped,
+                                    isSyllable: false,
+                                    isBackground: true,
+                                    isOppositeAligned: isOpposite
+                                });
                             }
                         }
                     }
                 }
             } else if (Array.isArray(body.Lines) && body.Lines.length > 0) {
-                for (const lineItem of body.Lines) {
-                    if (rawLines.length >= MAX_LYRICS_LINES) break;
-                    const lineText = (typeof lineItem === 'object' && lineItem ? (lineItem.Text || '') : String(lineItem)).trim().slice(0, MAX_LINE_LENGTH);
+                body.Lines.forEach((lineItem: { Text?: string } | string) => {
+                    const lineText = (typeof lineItem === 'object' && lineItem ? (lineItem.Text || '') : String(lineItem)).trim();
                     if (lineText) {
                         rawLines.push({
                             startTimeMs: 0,
@@ -656,7 +708,7 @@ export const lyricsProvider = {
                             text: lineText
                         });
                     }
-                }
+                });
             }
 
             if (rawLines.length === 0) return null;
@@ -664,33 +716,28 @@ export const lyricsProvider = {
             const flatLines = processFlatLines(rawLines);
 
             const songwriters = Array.isArray(body.SongWriters)
-                ? body.SongWriters
-                    .filter((w: unknown): w is string => typeof w === 'string' && w.trim().length > 0)
-                    .slice(0, 50)
-                    .map((w: string) => w.trim().slice(0, 200))
+                ? body.SongWriters.filter((w: unknown): w is string => typeof w === 'string' && w.trim().length > 0)
                 : undefined;
 
             let maker: Contributor | undefined;
             if (body.UploadAttribution?.Maker) {
                 const m = body.UploadAttribution.Maker;
-                const safeId = m.id ? String(m.id).slice(0, 100) : undefined;
                 maker = {
-                    id: safeId,
-                    username: (m.username || 'Contributor').slice(0, 100),
-                    avatar: m.avatar ? String(m.avatar).slice(0, 500) : undefined,
-                    url: m.url ? String(m.url).slice(0, 500) : (safeId ? `https://spicylyrics.org/uid/${safeId}` : undefined)
+                    id: m.id,
+                    username: m.username || 'Contributor',
+                    avatar: m.avatar,
+                    url: m.url || (m.id ? `https://spicylyrics.org/uid/${m.id}` : undefined)
                 };
             }
 
             let uploader: Contributor | undefined;
             if (body.UploadAttribution?.Uploader) {
                 const u = body.UploadAttribution.Uploader;
-                const safeId = u.id ? String(u.id).slice(0, 100) : undefined;
                 uploader = {
-                    id: safeId,
-                    username: (u.username || 'Contributor').slice(0, 100),
-                    avatar: u.avatar ? String(u.avatar).slice(0, 500) : undefined,
-                    url: u.url ? String(u.url).slice(0, 500) : (safeId ? `https://spicylyrics.org/uid/${safeId}` : undefined)
+                    id: u.id,
+                    username: u.username || 'Contributor',
+                    avatar: u.avatar,
+                    url: u.url || (u.id ? `https://spicylyrics.org/uid/${u.id}` : undefined)
                 };
             }
 
@@ -703,7 +750,7 @@ export const lyricsProvider = {
             return {
                 lines: flatLines,
                 provider: 'spicy',
-                syncType: hasSyllables ? 'SYLLABLE' : 'LINE',
+                syncType: (body.Type === 'Syllable' || hasSyllables) ? 'SYLLABLE' : 'LINE',
                 attribution: {
                     source: validSource,
                     songwriters: songwriters && songwriters.length > 0 ? songwriters : undefined,

@@ -11,16 +11,7 @@ let lastSongId = '';
 let isCurrentActiveTab = false;
 let authenticatedSpotifyToken = null;
 let fiberTrackData = null;
-const MAX_CANVAS_CACHE = 100;
 const canvasCache = new Map(); // trackId -> canvasUrl (string or null)
-
-function setCanvasCache(key, val) {
-    if (canvasCache.size >= MAX_CANVAS_CACHE) {
-        const oldestKey = canvasCache.keys().next().value;
-        if (oldestKey) canvasCache.delete(oldestKey);
-    }
-    canvasCache.set(key, val);
-}
 
 // Protobuf encoder for Spotify canvaz-cache request
 function encodeCanvasProtobuf(trackId) {
@@ -66,6 +57,7 @@ async function fetchWebPlayerToken() {
             if (data?.accessToken) {
                 authenticatedSpotifyToken = data.accessToken;
                 console.log('[LyricsBridge: Spotify] Retrieved authenticated Web Player access token');
+                socket.emit('canvas_update', { spotifyToken: authenticatedSpotifyToken });
                 return authenticatedSpotifyToken;
             }
         }
@@ -103,7 +95,7 @@ async function fetchSpotifyCanvas(trackId) {
             const canvasUrl = parseCanvasProtobuf(buf);
             console.log(`[LyricsBridge: Spotify] Canvas result for ${trackId}:`, canvasUrl ? 'FOUND' : 'NONE');
             if (canvasUrl) {
-                setCanvasCache(trackId, canvasUrl);
+                canvasCache.set(trackId, canvasUrl);
                 return canvasUrl;
             }
         } else if (res.status === 401) {
@@ -122,13 +114,13 @@ async function fetchSpotifyCanvas(trackId) {
             const canvasUrl = json?.data?.canvasesList?.[0]?.canvasUrl;
             if (canvasUrl) {
                 console.log(`[LyricsBridge: Spotify] Canvas obtained via local bridge server for ${trackId}:`, canvasUrl);
-                setCanvasCache(trackId, canvasUrl);
+                canvasCache.set(trackId, canvasUrl);
                 return canvasUrl;
             }
         }
     } catch {}
 
-    setCanvasCache(trackId, null);
+    canvasCache.set(trackId, null);
     return null;
 }
 
@@ -138,16 +130,21 @@ window.addEventListener('message', (event) => {
     if (event.data?.sender === 'lyrics-app-spotify-token' && event.data.token) {
         authenticatedSpotifyToken = event.data.token;
         console.log('[LyricsBridge: Spotify] Authenticated token synced from Main World');
+        socket.emit('canvas_update', { spotifyToken: authenticatedSpotifyToken });
     }
     if (event.data?.sender === 'lyrics-app-spotify-fiber-track' && event.data.id) {
         fiberTrackData = { id: event.data.id, name: event.data.name || '' };
+        const data = getSpotifyData();
+        if (data && data.title && data.id && data.id !== lastEmittedTrackId) {
+            sendSongUpdate(data);
+        }
     }
 });
 
 // Trigger initial token request
 fetchWebPlayerToken();
 
-// Trigger click with full pointer & mouse event cycle for React compatibility
+// Trigger click cleanly with full pointer lifecycle for React compatibility
 function triggerClick(element) {
     if (!element) return false;
     try {
@@ -157,9 +154,10 @@ function triggerClick(element) {
         element.dispatchEvent(new MouseEvent('mousedown', eventOptions));
         element.dispatchEvent(new PointerEvent('pointerup', eventOptions));
         element.dispatchEvent(new MouseEvent('mouseup', eventOptions));
-        element.dispatchEvent(new MouseEvent('click', eventOptions));
         if (typeof element.click === 'function') {
             element.click();
+        } else {
+            element.dispatchEvent(new MouseEvent('click', eventOptions));
         }
         return true;
     } catch (err) {
@@ -180,8 +178,54 @@ function clickButton(selectors) {
     return false;
 }
 
+let lastCommandTime = 0;
+let lastCommandAction = '';
+
+function triggerInstantBurstScan() {
+    const prevKey = lastSongId;
+    let scans = 0;
+    const maxScans = 40; // 40 scans * 30ms = 1.2s max duration
+    let hasSentInitial = false;
+
+    const timer = setInterval(() => {
+        scans++;
+        const data = getSpotifyData();
+        if (data && data.title) {
+            const newKey = `${data.title}-${data.artist}`;
+            if (newKey !== prevKey) {
+                if (!hasSentInitial) {
+                    hasSentInitial = true;
+                    console.log(`[LyricsBridge: Spotify] Instant track change detected on scan #${scans} (${scans * 30}ms):`, data.title);
+                    sendSongUpdate(data);
+                    if (data.id) {
+                        clearInterval(timer);
+                        return;
+                    }
+                } else if (data.id && data.id !== lastEmittedTrackId) {
+                    console.log(`[LyricsBridge: Spotify] Track ID resolved on scan #${scans} (${scans * 30}ms):`, data.id);
+                    sendSongUpdate(data);
+                    clearInterval(timer);
+                    return;
+                }
+            }
+        }
+        if (scans >= maxScans) {
+            clearInterval(timer);
+        }
+    }, 30);
+}
+
 // Listen for music commands from the Electron app
 socket.on('music_command', (data) => {
+    if (!data?.action) return;
+    const now = Date.now();
+    if (data.action === lastCommandAction && now - lastCommandTime < 150) {
+        console.log('[LyricsBridge: Spotify] Debouncing duplicate music command:', data.action);
+        return;
+    }
+    lastCommandTime = now;
+    lastCommandAction = data.action;
+
     console.log('[LyricsBridge: Spotify] Music command received:', data.action);
 
     // Only process command if this tab has an active player or was playing
@@ -200,6 +244,7 @@ socket.on('music_command', (data) => {
                 'button[aria-label="Previous"]',
                 'button[aria-label="Skip back"]'
             ]);
+            triggerInstantBurstScan();
             break;
 
         case 'play-pause':
@@ -222,6 +267,7 @@ socket.on('music_command', (data) => {
                 'button[aria-label="Next"]',
                 'button[aria-label="Skip forward"]'
             ]);
+            triggerInstantBurstScan();
             break;
     }
 });
@@ -324,22 +370,13 @@ function getSpotifyData() {
 
         // 1. Check all candidate track link selectors STRICTLY within playerBar (never query full document)
         if (!trackId) {
-            const trackLinkSelectors = [
-                '[data-testid="now-playing-widget"] a[href*="/track/"]',
-                '[data-testid="context-item-info-title"] a[href*="/track/"]',
-                'a[data-testid="context-item-link"][href*="/track/"]',
-                '[data-testid="now-playing-bar"] a[href*="/track/"]',
-                '[data-testid="now-playing-view"] a[href*="/track/"]',
-                'a[href*="/track/"]'
-            ];
-            for (const selector of trackLinkSelectors) {
-                const linkEl = playerBar.querySelector(selector);
-                if (linkEl && linkEl.href) {
-                    const match = linkEl.href.match(/\/track\/([a-zA-Z0-9]{22})/);
-                    if (match) {
-                        trackId = match[1];
-                        break;
-                    }
+            const trackLinks = playerBar.querySelectorAll('a[href]');
+            for (const linkEl of trackLinks) {
+                if (!linkEl.href) continue;
+                const match = linkEl.href.match(/(?:track\/|track%3A|track:)([a-zA-Z0-9]{22})/i);
+                if (match) {
+                    trackId = match[1];
+                    break;
                 }
             }
         }
@@ -464,10 +501,18 @@ function getSpotifyData() {
     };
 }
 
+let lastEmittedTrackId = '';
+let lastEmittedCanvasUrl = '';
+let lastEmittedAlbum = '';
+let lastEmittedDuration = 0;
+
 function sendSongUpdate(data) {
     if (!data.title) return;
     lastSongId = `${data.title}-${data.artist}`;
-    fiberTrackData = null; // Reset on song change to prevent ID bleed
+    lastEmittedTrackId = data.id || '';
+    lastEmittedCanvasUrl = data.canvasUrl || '';
+    lastEmittedAlbum = data.album || '';
+    lastEmittedDuration = data.duration || 0;
     isCurrentActiveTab = true;
     console.log('[LyricsBridge: Spotify] New Song Update:', data.title, 'by', data.artist, '(Track ID:', data.id, ')');
 
@@ -480,6 +525,7 @@ function sendSongUpdate(data) {
             if (resolvedCanvas) {
                 console.log('[LyricsBridge: Spotify] Emitting async canvas_update for', data.id, resolvedCanvas);
                 data.canvasUrl = resolvedCanvas;
+                lastEmittedCanvasUrl = resolvedCanvas;
                 socket.emit('canvas_update', {
                     trackId: data.id,
                     canvasUrl: resolvedCanvas,
@@ -502,6 +548,24 @@ function sendProgressUpdate(data) {
     });
 }
 
+function checkAndBroadcastSpotify(data) {
+    if (!data || !data.title) return;
+    const songId = `${data.title}-${data.artist}`;
+    const isNewSong = songId !== lastSongId;
+    const isNewTrackId = Boolean(data.id && data.id !== lastEmittedTrackId);
+    const isNewCanvas = Boolean(data.canvasUrl && data.canvasUrl !== lastEmittedCanvasUrl);
+    const isNewAlbum = Boolean(data.album && !lastEmittedAlbum);
+    const isNewDuration = Boolean(data.duration && !lastEmittedDuration);
+
+    if (isNewSong || isNewTrackId || isNewCanvas || isNewAlbum || isNewDuration) {
+        sendSongUpdate(data);
+    } else {
+        if (data.isPlaying || isCurrentActiveTab) {
+            sendProgressUpdate(data);
+        }
+    }
+}
+
 // Send current song immediately on connection/reconnection
 socket.on('connect', () => {
     console.log('[LyricsBridge: Spotify] Connected to Lyrics Electron App');
@@ -511,40 +575,36 @@ socket.on('connect', () => {
     }
 });
 
-// Periodic status poll
-setInterval(() => {
+socket.on('request_current_song', () => {
     const data = getSpotifyData();
-    if (!data.title) return;
-
-    const songId = `${data.title}-${data.artist}`;
-    if (songId !== lastSongId) {
+    if (data.title) {
         sendSongUpdate(data);
-    } else {
-        // Send progress updates when playing or when active
-        if (data.isPlaying || isCurrentActiveTab) {
-            sendProgressUpdate(data);
-        }
     }
-}, 300);
+});
+
+// Periodic status poll (200ms for fast reaction)
+setInterval(() => {
+    checkAndBroadcastSpotify(getSpotifyData());
+}, 200);
 
 // Fast reaction using MutationObserver on the player bar
 const observer = new MutationObserver(() => {
-    const data = getSpotifyData();
-    if (!data.title) return;
-
-    const songId = `${data.title}-${data.artist}`;
-    if (songId !== lastSongId) {
-        sendSongUpdate(data);
-    }
+    checkAndBroadcastSpotify(getSpotifyData());
 });
 
 function initObserver() {
     const target = document.querySelector('[data-testid="now-playing-bar"], footer, body');
     if (target) {
-        observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label', 'src'] });
-        console.log('[LyricsBridge: Spotify] MutationObserver attached to Spotify player');
+        observer.observe(target, { 
+            childList: true, 
+            subtree: true, 
+            characterData: true,
+            attributes: true, 
+            attributeFilter: ['aria-label', 'src', 'title', 'href'] 
+        });
+        console.log('[LyricsBridge: Spotify] Fast MutationObserver attached to Spotify player');
     } else {
-        setTimeout(initObserver, 1500);
+        setTimeout(initObserver, 1000);
     }
 }
 initObserver();

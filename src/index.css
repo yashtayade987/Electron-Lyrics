@@ -6,8 +6,8 @@
    ========================================================================== */
 
 :root {
-  /* Core Apple System Font Stack (SF Pro with Inter fallback) */
-  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", sans-serif;
+  /* Core Apple System Font Stack (SF Pro with Inter & Segoe UI Black fallback) */
+  --font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI Black", "Segoe UI", system-ui, sans-serif;
 
   /* Semantic Typography & Vibrancy (Dark / Dynamic Default) */
   --label-primary: #ffffff;
@@ -513,8 +513,12 @@ body.theme-light .apple-media-btn:hover {
 
 /* Lyric Lines Typography & Spatial Depth (Spicetify Spicy Lyrics & Apple Music) */
 .lyric-line {
-  font-size: clamp(calc(1.25rem + 2px), calc(5.8vmin + 2px), calc(3.4rem + 2px));
+  font-family: var(--font-family);
+  font-size: clamp(calc(1.25rem + 5px), calc(5.8vmin + 5px), calc(3.4rem + 5px));
   font-weight: 900 !important; /* Bold Typography throughout */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: weight;
   letter-spacing: -0.02em;
   margin-bottom: clamp(1.2rem, 4vh, 2.6rem);
   color: var(--label-primary) !important;
@@ -532,10 +536,12 @@ body.theme-light .apple-media-btn:hover {
   overflow-wrap: break-word;
   word-break: break-word;
 
+  --DefaultLyricsSize: clamp(calc(1.25rem + 5px), calc(5.8vmin + 5px), calc(3.4rem + 5px));
+  --BlurAmount: 1.2px;
   /* Inactive baseline with optical depth-of-field */
   opacity: 0.42;
   transform: none !important;
-  filter: blur(var(--dynamic-blur, 1.2px));
+  filter: blur(var(--dynamic-blur, var(--BlurAmount, 1.2px)));
   transition:
     opacity 350ms var(--ease-spring),
     filter 350ms var(--ease-spring);
@@ -586,60 +592,70 @@ body.theme-light .lyric-line::before {
   will-change: opacity;
 }
 
-/* Background Vocals (.bg-line) from Spicy Lyrics API */
-.lyric-line.bg-line {
-  font-size: clamp(calc(1.05rem + 2px), calc(4.6vmin + 2px), calc(2.5rem + 2px));
-  font-weight: 900 !important;
+/* Background Vocals (.bg-line) from Spicy Lyrics API: secondary vocals, reduced size, NOT BOLD */
+.lyric-line.bg-line,
+.lyric-line.bg-line.active-line {
+  font-size: clamp(calc(0.85rem + 4px), calc(3.2vmin + 4px), calc(1.6rem + 4px)) !important;
+  font-weight: 400 !important;
   font-style: normal !important;
-  opacity: 0.42;
-  margin-top: -0.2em;
-  margin-bottom: clamp(1rem, 3.2vh, 2.2rem);
+  font-synthesis: none !important;
   color: var(--label-primary) !important; /* Unified color across all lines */
   overflow: visible !important;
-  line-height: 1.48;
+  line-height: 1.42;
   letter-spacing: normal;
   padding-right: 14px;
   box-sizing: border-box;
 }
 
+.lyric-line.bg-line:not(.active-line) {
+  opacity: 0.42;
+  margin-top: -0.25em;
+  margin-bottom: clamp(0.8rem, 2.6vh, 1.8rem);
+}
+
 .lyric-line.bg-line.active-line {
   opacity: 1 !important;
   transform: none !important;
-  color: var(--label-primary) !important;
+  margin-top: -0.25em;
+  margin-bottom: clamp(0.8rem, 2.6vh, 1.8rem);
 }
 
 .lyric-line.bg-line .word,
-.lyric-line.bg-line .letter {
+.lyric-line.bg-line .letter,
+.lyric-line.bg-line .word-group,
+.lyric-line.bg-line .words-container {
   font-style: normal !important;
-  font-weight: 900 !important;
+  font-weight: 400 !important;
+  font-synthesis: none !important;
   overflow: visible !important;
-  padding: 0 0.06em;
-  color: inherit !important;
+  padding: 0 0.04em;
   letter-spacing: normal;
 }
 
 .lyric-line.bg-line .line-text-fallback {
   font-style: normal !important;
-  font-weight: 900 !important;
+  font-weight: 400 !important;
+  font-synthesis: none !important;
   overflow: visible !important;
-  padding: 0 0.06em;
+  padding: 0 0.04em;
   -webkit-background-clip: unset !important;
   background-clip: unset !important;
   background-image: none !important;
   -webkit-text-fill-color: initial !important;
   color: inherit !important;
-  line-height: 1.48;
+  line-height: 1.42;
 }
 
 .lyric-line.bg-line .bg-paren {
   display: inline-block;
-  opacity: 0.95;
-  font-weight: 900 !important;
+  opacity: 0.85;
+  font-weight: 500 !important;
   font-style: normal !important;
+  font-synthesis: none !important;
   margin: 0 0.12em;
   padding: 0 0.08em;
-  color: inherit !important;
-  -webkit-text-fill-color: currentColor !important;
+  color: var(--label-primary) !important;
+  -webkit-text-fill-color: var(--label-primary) !important;
   overflow: visible !important;
   vertical-align: baseline;
 }
@@ -681,6 +697,12 @@ body.theme-light .lyric-line::before {
 .lyric-line.instrumental.active-line {
   opacity: 1;
   transform: scale(1.06);
+}
+
+.lyric-line.instrumental.pre-hidden {
+  opacity: 0 !important;
+  transform: scale(0.92) !important;
+  pointer-events: none;
 }
 
 .instrumental-dots {
@@ -752,8 +774,11 @@ body.theme-light .instrumental-dot.dot-active {
   display: inline-block;
   position: relative;
   transition: opacity 250ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
-  opacity: 0.5;
+  opacity: 1 !important;
+  font-family: inherit;
   font-weight: 900 !important;
+  font-synthesis: weight;
+  -webkit-font-smoothing: antialiased;
   max-width: 100%;
   overflow-wrap: break-word;
   word-break: break-word;
@@ -837,104 +862,301 @@ body.theme-light .lyrics-container.line-mode-only .lyric-line.active-line .lette
   font-weight: 900 !important;
 }
 
-/* Spicetify Spicy Lyrics Word-by-Word Karaoke Wash & Visual Effects */
-.lyrics-container.word-mode .lyric-line .word {
+/* Background vocals in line mode: regular weight (NOT BOLD) */
+.lyrics-container.line-mode-only .lyric-line.bg-line,
+.lyrics-container.line-mode-only .lyric-line.bg-line .word,
+.lyrics-container.line-mode-only .lyric-line.bg-line .word.letterGroup,
+.lyrics-container.line-mode-only .lyric-line.bg-line .letter,
+.animated-single-line-container.line-mode-only .lyric-line.bg-line,
+.animated-single-line-container.line-mode-only .lyric-line.bg-line .word,
+.animated-single-line-container.line-mode-only .lyric-line.bg-line .word.letterGroup,
+.animated-single-line-container.line-mode-only .lyric-line.bg-line .letter {
+  font-weight: 400 !important;
+  font-synthesis: none !important;
+}
+
+/* ==========================================================================
+   Spicetify Spicy Lyrics Word-by-Word Karaoke Wash & Visual Effects
+   ========================================================================== */
+
+/* Active Line Isolation in Word Mode:
+   Parent lyric-line, words-container, and word-group MUST have transparent color,
+   zero text-shadow, and no background-image so that ONLY individual words/letters paint their own wash & bloom. */
+.lyrics-container.word-mode .lyric-line.active-line,
+.animated-single-line-container.word-mode .lyric-line.active-line {
+  color: transparent !important;
+  text-shadow: none !important;
+  background-image: none !important;
+  background: none !important;
+}
+
+.lyrics-container.word-mode .lyric-line .words-container,
+.lyrics-container.word-mode .lyric-line .word-group,
+.animated-single-line-container.word-mode .lyric-line .words-container,
+.animated-single-line-container.word-mode .lyric-line .word-group {
+  color: transparent !important;
+  text-shadow: none !important;
+  background: none !important;
+}
+
+.lyrics-container.word-mode .lyric-line.active-line .word,
+.lyrics-container.word-mode .lyric-line.active-line .letter,
+.lyrics-container.word-mode .lyric-line.active-line .letterGroup,
+.lyrics-container.word-mode .lyric-line.active-line .instrumental-dot,
+.animated-single-line-container.word-mode .lyric-line.active-line .word,
+.animated-single-line-container.word-mode .lyric-line.active-line .letter,
+.animated-single-line-container.word-mode .lyric-line.active-line .letterGroup,
+.animated-single-line-container.word-mode .lyric-line.active-line .instrumental-dot {
+  transition: none !important;
+  will-change: transform, scale, opacity;
+}
+
+/* Base Word Style (Standard Syllable / Word) */
+.lyrics-container.word-mode .lyric-line .word:not(.letterGroup),
+.animated-single-line-container.word-mode .lyric-line .word:not(.letterGroup) {
   cursor: pointer;
   font-weight: 900 !important;
   position: relative;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  --gradient-position: -25%;
-  --gradient-color: 255;
+  display: inline-block;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  opacity: 1 !important;
+  --gradient-position: -20%;
   --gradient-alpha: 1;
-  --gradient-alpha-end: 0.42;
+  --gradient-alpha-end: 0.35;
   --gradient-offset: 18%;
+  --text-shadow-blur-radius: 4px;
+  --text-shadow-opacity: 0%;
 
   /* High-fidelity multi-stop liquid gradient wash for seamless vocal flow */
   background-image: linear-gradient(
     90deg,
-    rgba(255, 255, 255, var(--gradient-alpha)) var(--gradient-position),
-    rgba(255, 255, 255, calc(var(--gradient-alpha) * 0.92)) calc(var(--gradient-position) + 4%),
-    rgba(255, 255, 255, calc(var(--gradient-alpha) * 0.62)) calc(var(--gradient-position) + 10%),
-    rgba(255, 255, 255, var(--gradient-alpha-end)) calc(var(--gradient-position) + var(--gradient-offset))
+    rgba(255, 255, 255, var(--gradient-alpha, 1)) var(--gradient-position, -20%),
+    rgba(255, 255, 255, calc(var(--gradient-alpha, 1) * 0.92)) calc(var(--gradient-position, -20%) + 4%),
+    rgba(255, 255, 255, calc(var(--gradient-alpha, 1) * 0.62)) calc(var(--gradient-position, -20%) + 10%),
+    rgba(255, 255, 255, var(--gradient-alpha-end, 0.35)) calc(var(--gradient-position, -20%) + var(--gradient-offset, 18%))
   );
-  transition:
-    transform 280ms cubic-bezier(0.2, 0, 0, 1),
-    text-shadow 320ms ease;
-  opacity: 1;
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(255, 255, 255, var(--text-shadow-opacity, 0%)) !important;
 }
 
 /* Light mode gradient wash tokens: pure sharp black wash */
-body.theme-light .lyrics-container.word-mode .lyric-line .word {
-  --gradient-alpha: 1;
-  --gradient-alpha-end: 0.42;
+body.theme-light .lyrics-container.word-mode .lyric-line .word:not(.letterGroup),
+body.theme-light .animated-single-line-container.word-mode .lyric-line .word:not(.letterGroup) {
   background-image: linear-gradient(
     90deg,
-    rgba(0, 0, 0, var(--gradient-alpha)) var(--gradient-position),
-    rgba(0, 0, 0, calc(var(--gradient-alpha) * 0.92)) calc(var(--gradient-position) + 4%),
-    rgba(0, 0, 0, calc(var(--gradient-alpha) * 0.62)) calc(var(--gradient-position) + 10%),
-    rgba(0, 0, 0, var(--gradient-alpha-end)) calc(var(--gradient-position) + var(--gradient-offset))
+    rgba(0, 0, 0, var(--gradient-alpha, 1)) var(--gradient-position, -20%),
+    rgba(0, 0, 0, calc(var(--gradient-alpha, 1) * 0.92)) calc(var(--gradient-position, -20%) + 4%),
+    rgba(0, 0, 0, calc(var(--gradient-alpha, 1) * 0.62)) calc(var(--gradient-position, -20%) + 10%),
+    rgba(0, 0, 0, var(--gradient-alpha-end, 0.35)) calc(var(--gradient-position, -20%) + var(--gradient-offset, 18%))
   );
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(0, 0, 0, calc(var(--text-shadow-opacity, 0%) * 0.4)) !important;
 }
 
-/* Fallback lines in word mode: uniform solid color with no broken multiline gradient clipping */
-.lyrics-container.word-mode .lyric-line .line-text-fallback {
-  -webkit-background-clip: unset !important;
-  background-clip: unset !important;
-  background-image: none !important;
-  -webkit-text-fill-color: currentColor !important;
-  color: inherit !important;
+/* Fallback lines in word mode: uniform smooth line-level gradient wash */
+.lyrics-container.word-mode .lyric-line .line-text-fallback,
+.animated-single-line-container.word-mode .lyric-line .line-text-fallback {
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
   font-weight: 900 !important;
 }
 
-/* Background vocal line modifier */
-.lyrics-container.word-mode .lyric-line.bg-line .word {
+/* Letter group container: individual letters paint their own gradients, scale, and spring physics */
+.lyrics-container.word-mode .lyric-line .word.letterGroup,
+.animated-single-line-container.word-mode .lyric-line .word.letterGroup {
+  display: inline-flex !important;
+  opacity: 1 !important;
+  background-image: none !important;
+  background: none !important;
+  -webkit-background-clip: unset !important;
+  background-clip: unset !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  text-shadow: none !important;
+  font-family: inherit;
+  font-weight: 900 !important;
+  font-synthesis: weight;
+}
+
+.lyrics-container.word-mode .lyric-line .word .letter,
+.animated-single-line-container.word-mode .lyric-line .word .letter {
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 900 !important;
+  font-synthesis: weight;
+  -webkit-font-smoothing: antialiased;
+  position: relative;
+  display: inline-block;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  color: transparent !important;
+  opacity: 1 !important;
+  --gradient-position: -20%;
   --gradient-alpha: 1;
-  --gradient-alpha-end: 0.42;
+  --gradient-alpha-end: 0.35;
+  --gradient-offset: 18%;
+  --text-shadow-blur-radius: 4px;
+  --text-shadow-opacity: 0%;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, var(--gradient-alpha, 1)) var(--gradient-position, -20%),
+    rgba(255, 255, 255, calc(var(--gradient-alpha, 1) * 0.92)) calc(var(--gradient-position, -20%) + 4%),
+    rgba(255, 255, 255, calc(var(--gradient-alpha, 1) * 0.62)) calc(var(--gradient-position, -20%) + 10%),
+    rgba(255, 255, 255, var(--gradient-alpha-end, 0.35)) calc(var(--gradient-position, -20%) + var(--gradient-offset, 18%))
+  );
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(255, 255, 255, var(--text-shadow-opacity, 0%)) !important;
+}
+
+body.theme-light .lyrics-container.word-mode .lyric-line .word .letter,
+body.theme-light .animated-single-line-container.word-mode .lyric-line .word .letter {
+  background-image: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, var(--gradient-alpha, 1)) var(--gradient-position, -20%),
+    rgba(0, 0, 0, calc(var(--gradient-alpha, 1) * 0.92)) calc(var(--gradient-position, -20%) + 4%),
+    rgba(0, 0, 0, calc(var(--gradient-alpha, 1) * 0.62)) calc(var(--gradient-position, -20%) + 10%),
+    rgba(0, 0, 0, var(--gradient-alpha-end, 0.35)) calc(var(--gradient-position, -20%) + var(--gradient-offset, 18%))
+  );
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(0, 0, 0, calc(var(--text-shadow-opacity, 0%) * 0.4)) !important;
+}
+
+/* Space characters inside letters must keep their width */
+.lyrics-container.word-mode .lyric-line .word .letter.SpaceLetter,
+.animated-single-line-container.word-mode .lyric-line .word .letter.SpaceLetter {
+  white-space: pre;
+  min-width: 0.3ch;
+}
+
+/* Background vocal line modifier: secondary vocals, reduced weight (NOT BOLD) */
+.lyrics-container.word-mode .lyric-line.bg-line .word,
+.animated-single-line-container.word-mode .lyric-line.bg-line .word {
+  --gradient-alpha: 0.88;
+  --gradient-alpha-end: 0.35;
   overflow: visible !important;
+  font-weight: 400 !important;
+  font-synthesis: none !important;
+}
+
+.lyrics-container.word-mode .lyric-line.bg-line .word .letter,
+.animated-single-line-container.word-mode .lyric-line.bg-line .word .letter {
+  --gradient-alpha: 0.88;
+  --gradient-alpha-end: 0.35;
+  font-weight: 400 !important;
+  font-synthesis: none !important;
+}
+
+.lyrics-container.word-mode .lyric-line.bg-line.active-line .word,
+.animated-single-line-container.word-mode .lyric-line.bg-line.active-line .word,
+.lyrics-container.word-mode .lyric-line.bg-line.active-line .word .letter,
+.animated-single-line-container.word-mode .lyric-line.bg-line.active-line .word .letter,
+.lyrics-container.word-mode .lyric-line.bg-line.passed-line .word,
+.animated-single-line-container.word-mode .lyric-line.bg-line.passed-line .word,
+.lyrics-container.word-mode .lyric-line.bg-line.passed-line .word .letter,
+.animated-single-line-container.word-mode .lyric-line.bg-line.passed-line .word .letter {
+  font-weight: 400 !important;
+  font-synthesis: none !important;
+}
+
+/* Syllable Active State glow bloom for standard words */
+.lyrics-container.word-mode .lyric-line:not(.bg-line).active-line .word.active-word:not(.letterGroup),
+.animated-single-line-container.word-mode .lyric-line:not(.bg-line).active-line .word.active-word:not(.letterGroup) {
+  z-index: 3;
   font-weight: 900 !important;
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(255, 255, 255, var(--text-shadow-opacity, 0%)) !important;
 }
 
-.lyrics-container.word-mode .lyric-line.bg-line .line-text-fallback {
-  -webkit-background-clip: unset !important;
-  background-clip: unset !important;
-  background-image: none !important;
-  -webkit-text-fill-color: currentColor !important;
-  color: inherit !important;
+body.theme-light .lyrics-container.word-mode .lyric-line:not(.bg-line).active-line .word.active-word:not(.letterGroup),
+body.theme-light .animated-single-line-container.word-mode .lyric-line:not(.bg-line).active-line .word.active-word:not(.letterGroup) {
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(0, 0, 0, calc(var(--text-shadow-opacity, 0%) * 0.4)) !important;
+}
+
+/* Letter Active State glow bloom for sustained syllables */
+.lyrics-container.word-mode .lyric-line:not(.bg-line).active-line .word .letter.active-letter,
+.animated-single-line-container.word-mode .lyric-line:not(.bg-line).active-line .word .letter.active-letter {
+  z-index: 3;
   font-weight: 900 !important;
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(255, 255, 255, var(--text-shadow-opacity, 0%)) !important;
 }
 
-/* Syllable Active State (Singing: Gentle grounded vocal lift without premature text-shadow bleed) */
-.lyrics-container.word-mode .lyric-line.active-line .word.active-word {
-  transform: none;
-  will-change: transform;
-  text-shadow: none;
-  z-index: 2;
+body.theme-light .lyrics-container.word-mode .lyric-line:not(.bg-line).active-line .word .letter.active-letter,
+body.theme-light .animated-single-line-container.word-mode .lyric-line:not(.bg-line).active-line .word .letter.active-letter {
+  text-shadow: 0 0 var(--text-shadow-blur-radius, 4px) rgba(0, 0, 0, calc(var(--text-shadow-opacity, 0%) * 0.4)) !important;
+}
+
+.lyrics-container.word-mode .lyric-line.bg-line.active-line .word.active-word,
+.animated-single-line-container.word-mode .lyric-line.bg-line.active-line .word.active-word,
+.lyrics-container.word-mode .lyric-line.bg-line.active-line .word .letter.active-letter,
+.animated-single-line-container.word-mode .lyric-line.bg-line.active-line .word .letter.active-letter {
+  font-weight: 400 !important;
+  font-synthesis: none !important;
+}
+
+/* Resting State (Not sung yet) on Active Line */
+.lyrics-container.word-mode .lyric-line.active-line .word:not(.active-word):not(.passed-word):not(.letterGroup),
+.animated-single-line-container.word-mode .lyric-line.active-line .word:not(.active-word):not(.passed-word):not(.letterGroup) {
+  text-shadow: none !important;
+  --text-shadow-opacity: 0% !important;
+  --gradient-position: -20% !important;
+}
+
+.lyrics-container.word-mode .lyric-line.active-line .word .letter:not(.active-letter):not(.passed-letter),
+.animated-single-line-container.word-mode .lyric-line.active-line .word .letter:not(.active-letter):not(.passed-letter) {
+  text-shadow: none !important;
+  --text-shadow-opacity: 0% !important;
+  --gradient-position: -20% !important;
+}
+
+/* Syllable Passed State on Active Line */
+.lyrics-container.word-mode .lyric-line.active-line .word.passed-word:not(.letterGroup),
+.animated-single-line-container.word-mode .lyric-line.active-line .word.passed-word:not(.letterGroup) {
   font-weight: 900 !important;
+  text-shadow: none !important;
+  --text-shadow-opacity: 0% !important;
+  --gradient-position: 100% !important;
 }
 
-body.theme-light .lyrics-container.word-mode .lyric-line.active-line .word.active-word {
-  transform: none;
-  text-shadow: none;
-}
-
-/* Syllable Passed State (Sung: Smoothly settled, zero glow) */
-.lyrics-container.word-mode .lyric-line.active-line .word.passed-word {
-  transform: none;
-  text-shadow: none;
+.lyrics-container.word-mode .lyric-line.active-line .word .letter.passed-letter,
+.animated-single-line-container.word-mode .lyric-line.active-line .word .letter.passed-letter,
+.lyrics-container.word-mode .lyric-line.active-line .word.passed-word .letter,
+.animated-single-line-container.word-mode .lyric-line.active-line .word.passed-word .letter {
   font-weight: 900 !important;
+  text-shadow: none !important;
+  --text-shadow-opacity: 0% !important;
+  --gradient-position: 100% !important;
 }
 
-.lyrics-container.word-mode .lyric-line.passed-line .word {
-  --gradient-position: 100%;
+/* Syllables on Passed Lines */
+.lyrics-container.word-mode .lyric-line.passed-line .word,
+.animated-single-line-container.word-mode .lyric-line.passed-line .word {
+  --gradient-position: 100% !important;
   --gradient-alpha: 0.7;
   --gradient-alpha-end: 0.7;
   font-weight: 900 !important;
+  text-shadow: none !important;
 }
 
-body.theme-light .lyrics-container.word-mode .lyric-line.passed-line .word {
-  --gradient-position: 100%;
+.lyrics-container.word-mode .lyric-line.passed-line .word .letter,
+.animated-single-line-container.word-mode .lyric-line.passed-line .word .letter {
+  --gradient-position: 100% !important;
+  --gradient-alpha: 0.7;
+  --gradient-alpha-end: 0.7;
+  font-weight: 900 !important;
+  text-shadow: none !important;
+}
+
+body.theme-light .lyrics-container.word-mode .lyric-line.passed-line .word,
+body.theme-light .animated-single-line-container.word-mode .lyric-line.passed-line .word {
+  --gradient-position: 100% !important;
+  --gradient-alpha: 0.68;
+  --gradient-alpha-end: 0.68;
+}
+
+body.theme-light .lyrics-container.word-mode .lyric-line.passed-line .word .letter,
+body.theme-light .animated-single-line-container.word-mode .lyric-line.passed-line .word .letter {
+  --gradient-position: 100% !important;
   --gradient-alpha: 0.68;
   --gradient-alpha-end: 0.68;
 }
@@ -1684,18 +1906,19 @@ body.theme-light .animated-artwork-top-player .player-header {
 }
 
 .animated-single-line-container .lyric-line.active-line {
-  font-size: clamp(calc(1.45rem + 2px), calc(6vmin + 2px), calc(3.2rem + 2px));
+  font-size: clamp(calc(1.45rem + 5px), calc(6vmin + 5px), calc(3.2rem + 5px));
   font-weight: 900 !important;
   color: var(--label-primary) !important;
   transform: none !important;
 }
 
-/* In word-mode, lyric-line must have NO text-shadow so WebKit background-clip: text wash works cleanly */
+/* In word-mode, lyric-line must have NO text-shadow and transparent color so WebKit background-clip: text wash works cleanly */
 .lyrics-container.word-mode .lyric-line,
 .lyrics-container.word-mode .lyric-line.active-line,
 .animated-single-line-container.word-mode .lyric-line,
 .animated-single-line-container.word-mode .lyric-line.active-line {
   text-shadow: none !important;
+  color: transparent !important;
 }
 
 /* In line-mode-only, active line glows prominently */
@@ -1706,13 +1929,22 @@ body.theme-light .animated-artwork-top-player .player-header {
     0 2px 14px rgba(0, 0, 0, 0.85);
 }
 
+.animated-single-line-container .lyric-line.bg-line,
 .animated-single-line-container .lyric-line.bg-line.active-line {
-  font-size: clamp(calc(1.15rem + 2px), calc(4.8vmin + 2px), calc(2.5rem + 2px));
-  font-weight: 900 !important;
+  font-size: clamp(calc(0.95rem + 4px), calc(3.5vmin + 4px), calc(1.7rem + 4px)) !important;
+  font-weight: 400 !important;
+  font-synthesis: none !important;
   color: var(--label-primary) !important;
   font-style: normal !important;
   overflow: visible !important;
   transform: none !important;
+  margin-top: 4px;
+}
+
+.animated-single-line-container.word-mode .lyric-line.bg-line,
+.animated-single-line-container.word-mode .lyric-line.bg-line.active-line {
+  color: transparent !important;
+  text-shadow: none !important;
 }
 
 .animated-single-line-container .instrumental-dots {
@@ -1720,7 +1952,7 @@ body.theme-light .animated-artwork-top-player .player-header {
 }
 
 .animated-lyric-placeholder {
-  font-size: clamp(18px, calc(2.8vmin + 2px), 24px);
+  font-size: clamp(21px, calc(2.8vmin + 5px), 27px);
   color: var(--label-primary);
   font-weight: 850;
   letter-spacing: -0.01em;

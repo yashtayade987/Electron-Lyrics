@@ -57,23 +57,6 @@ function parseCanvasProtobuf(buffer: ArrayBuffer): string | null {
     return null;
 }
 
-function mergeSignalWithTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
-    const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    if (!signal) return timeoutSignal;
-    if (typeof AbortSignal.any === 'function') {
-        return AbortSignal.any([signal, timeoutSignal]);
-    }
-    const controller = new AbortController();
-    const onAbort = () => controller.abort();
-    if (signal.aborted) {
-        controller.abort();
-        return controller.signal;
-    }
-    signal.addEventListener('abort', onAbort, { once: true });
-    timeoutSignal.addEventListener('abort', onAbort, { once: true });
-    return controller.signal;
-}
-
 let cachedClientToken: string | null = null;
 let clientTokenExpires = 0;
 
@@ -102,7 +85,7 @@ async function getClientToken(signal?: AbortSignal): Promise<string | null> {
                     }
                 }
             }),
-            signal: mergeSignalWithTimeout(signal, 4000)
+            signal: signal ? signal : AbortSignal.timeout(4000)
         });
         if (res.ok) {
             const data = await res.json();
@@ -125,6 +108,10 @@ export const spotifyArtworkProvider = {
             cachedUserToken = token;
             console.log('[SpotifyArtworkProvider] Cached authenticated user token from Web Player');
         }
+    },
+
+    getCachedUserToken(): string | null {
+        return cachedUserToken;
     },
 
     /**
@@ -170,11 +157,7 @@ export const spotifyArtworkProvider = {
 
             // If track is from YouTube Music or has no valid Spotify ID, resolve via Spotify Search catalog
             if (!spotifyTrackId) {
-                spotifyTrackId = await resolveSpotifyTrackId(track.title, track.artist, track.album, track.duration, signal);
-            }
-
-            if (signal?.aborted) {
-                return fallback;
+                spotifyTrackId = await resolveSpotifyTrackId(track.title, track.artist, track.album, track.duration);
             }
 
             const canvasApiUrl = (import.meta.env.VITE_SPOTIFY_CANVAS_API as string) || 'http://localhost:4000';
@@ -184,7 +167,7 @@ export const spotifyArtworkProvider = {
             if (spotifyTrackId) {
                 try {
                     const apiRes = await fetch(`${canvasApiUrl.replace(/\/$/, '')}/api/canvas?trackId=${spotifyTrackId}${tokenParam}`, {
-                        signal: mergeSignalWithTimeout(signal, 6000)
+                        signal: AbortSignal.timeout(6000)
                     });
                     if (apiRes.ok) {
                         const json = await apiRes.json();
@@ -206,15 +189,11 @@ export const spotifyArtworkProvider = {
                 }
             }
 
-            if (signal?.aborted) {
-                return fallback;
-            }
-
             // Fallback: If track ID was not resolved or returned no canvas, query canvas API by song title and artist
             try {
                 const apiRes = await fetch(
                     `${canvasApiUrl.replace(/\/$/, '')}/api/canvas?title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.artist)}${tokenParam}`,
-                    { signal: mergeSignalWithTimeout(signal, 6000) }
+                    { signal: AbortSignal.timeout(6000) }
                 );
                 if (apiRes.ok) {
                     const json = await apiRes.json();
@@ -235,13 +214,13 @@ export const spotifyArtworkProvider = {
                 // proceed to direct lookup
             }
 
-            if (!spotifyTrackId || signal?.aborted) {
+            if (!spotifyTrackId) {
                 return fallback;
             }
 
             // 3. Query Spotify's modern GraphQL Pathfinder endpoint with client-token
             const token = cachedUserToken || await getAnonymousSpotifyToken(signal);
-            if (token && !signal?.aborted) {
+            if (token) {
                 try {
                     const clientToken = await getClientToken(signal);
                     const headers: Record<string, string> = {
@@ -265,7 +244,7 @@ export const spotifyArtworkProvider = {
                                 }
                             }
                         }),
-                        signal: mergeSignalWithTimeout(signal, 5000)
+                        signal: signal ? signal : AbortSignal.timeout(5000)
                     });
                     if (canvasRes.ok) {
                         const cJson = await canvasRes.json();
@@ -286,8 +265,6 @@ export const spotifyArtworkProvider = {
                     // proceed to legacy protobuf fallback
                 }
 
-                if (signal?.aborted) return fallback;
-
                 // Legacy protobuf fallback
                 try {
                     const payload = encodeCanvasProtobuf(spotifyTrackId);
@@ -299,7 +276,7 @@ export const spotifyArtworkProvider = {
                             'authorization': `Bearer ${token}`
                         },
                         body: payload as unknown as BodyInit,
-                        signal: mergeSignalWithTimeout(signal, 4000)
+                        signal: signal ? signal : AbortSignal.timeout(4000)
                     });
 
                     if (canvasRes.ok) {

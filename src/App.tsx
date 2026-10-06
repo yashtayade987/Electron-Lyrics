@@ -5,7 +5,7 @@ import { useAppStore, isSameSong } from './store/useAppStore';
 import { artworkResolver } from './utils/artwork/ArtworkResolver';
 import { spotifyArtworkProvider } from './utils/artwork/SpotifyArtworkProvider';
 import type { ArtworkTrackInfo } from './utils/artwork/types';
-import { lyricsProvider, cleanMetadata, cleanSpotifyId, type LyricsData } from './utils/lyricsProvider';
+import { lyricsProvider, cleanMetadata, cleanSpotifyId, setLyricsUserToken, type LyricsData } from './utils/lyricsProvider';
 import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:4000', {
@@ -35,6 +35,7 @@ function App() {
   const setAnimatedArtwork = useAppStore((s) => s.setAnimatedArtwork);
   const artworkPreference = useAppStore((s) => s.artworkPreference);
   const manualArtworkOverride = useAppStore((s) => s.manualArtworkOverride);
+  const sourceMode = useAppStore((s) => s.sourceMode);
 
   // Fine-grained metadata selectors (never re-renders on playback progress ticks)
   const songTitle = useAppStore((s) => s.currentSong.title);
@@ -49,9 +50,18 @@ function App() {
   const animatedArtwork = useAppStore((s) => s.currentSong.animatedArtwork);
 
   const currentSongKeyRef = useRef<string>('');
+  const lastFetchedSongIdRef = useRef<string | null>(null);
   const lyricsRequestIdRef = useRef<number>(0);
-  const artworkRequestIdRef = useRef<number>(0);
   const lastResolvedTrackKeyRef = useRef<string>('');
+  const lyricsAbortControllerRef = useRef<AbortController | null>(null);
+  const artworkAbortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      lyricsAbortControllerRef.current?.abort();
+      artworkAbortControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     document.body.classList.remove('theme-dynamic', 'theme-dark', 'theme-light');
@@ -60,12 +70,24 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    // When sourceMode changes, inform backend and request playback from selected source
+    if (socket.connected) {
+      socket.emit('switch_source_mode', sourceMode);
+      socket.emit('request_source_playback', sourceMode);
+    }
+    window.electron?.switchSource?.(sourceMode);
+  }, [sourceMode]);
+
+  useEffect(() => {
     // Connect to local websocket server that extension talks to
     socket.connect();
 
     socket.on('connect', () => {
       setIsConnected(true);
       console.log("[App] Connected to browser extension bridge");
+      const currentMode = useAppStore.getState().sourceMode;
+      socket.emit('switch_source_mode', currentMode);
+      socket.emit('request_source_playback', currentMode);
     });
 
     socket.on('disconnect', () => {
@@ -74,9 +96,16 @@ function App() {
     });
 
     socket.on('song_update', (songData) => {
-      console.log("[App] Received song_update:", songData.title, "by", songData.artist, "(Source:", songData.source, ")");
+      console.log("[App] Received song_update:", songData.title, "by", songData.artist, "(Source:", songData.source, "Origin:", songData._origin, ")");
+      const activeSourceMode = useAppStore.getState().sourceMode;
+      const isMatchesCurrentSource =
+        (activeSourceMode === 'desktop' && songData._origin === 'windows_media') ||
+        (activeSourceMode === 'web' && songData._origin === 'extension') ||
+        !songData._origin;
+
       if (songData.spotifyToken) {
         spotifyArtworkProvider.setCachedUserToken(songData.spotifyToken);
+        setLyricsUserToken(songData.spotifyToken);
       }
       const currentStoreSong = useAppStore.getState().currentSong;
       const isSame = isSameSong(currentStoreSong.title, currentStoreSong.artist, songData.title, songData.artist);
@@ -96,32 +125,55 @@ function App() {
         ? currentStoreSong.animatedArtwork
         : songData.animatedArtwork;
 
+      let incomingCoverArt = '';
+      if (typeof songData.coverArt === 'string') {
+        incomingCoverArt = songData.coverArt;
+      } else if (Array.isArray(songData.coverArt)) {
+        incomingCoverArt = (songData.coverArt.find((c: unknown) => typeof c === 'string' && c.length > 0) as string) || '';
+      }
+
       setSong({
         id: songData.id || (isSame ? currentStoreSong.id : null),
         title: songData.title,
         artist: songData.artist,
         album: songData.album || (isSame ? currentStoreSong.album : ''),
-        coverArt: songData.coverArt || (isSame ? currentStoreSong.coverArt : ''),
+        coverArt: incomingCoverArt || (isSame ? currentStoreSong.coverArt : ''),
         duration: songData.duration || (isSame ? currentStoreSong.duration : 0),
         source: songData.source,
         videoId: songData.videoId || (isSame ? currentStoreSong.videoId : undefined),
         canvasUrl: effectiveCanvasUrl,
         animatedArtwork: effectiveAnimatedArtwork,
         progress: initialProgress,
+        _origin: songData._origin,
         isExplicit: songData.isExplicit ?? (
           /\b(explicit|dirty)\b/i.test(songData.title || '') ||
           /\b(explicit|dirty)\b/i.test(songData.album || '')
         ),
       });
-      setIsPlaying(songData.isPlaying);
-      updateProgress(initialProgress);
+
+      if (isMatchesCurrentSource) {
+        setIsPlaying(songData.isPlaying);
+        updateProgress(initialProgress);
+      }
     });
 
     socket.on('canvas_update', (canvasData) => {
       console.log("[App] Received async canvas_update:", canvasData);
       if (canvasData.spotifyToken) {
         spotifyArtworkProvider.setCachedUserToken(canvasData.spotifyToken);
+        setLyricsUserToken(canvasData.spotifyToken);
       }
+
+      const activeSourceMode = useAppStore.getState().sourceMode;
+      const isMatchesCurrentSource =
+        (activeSourceMode === 'desktop' && canvasData._origin === 'windows_media') ||
+        (activeSourceMode === 'web' && canvasData._origin === 'extension') ||
+        !canvasData._origin;
+
+      if (!isMatchesCurrentSource) {
+        return;
+      }
+
       if (canvasData.canvasUrl) {
         const current = useAppStore.getState().currentSong;
 
@@ -135,29 +187,19 @@ function App() {
           return;
         }
 
-        // If canvasData carries song title/artist metadata, verify it matches current song
-        if (canvasData.title && current.title && !isSameSong(canvasData.title, canvasData.artist, current.title, current.artist)) {
-          return;
-        }
-
         // If already playing this exact canvas URL, do nothing to prevent unnecessary state ripples
         if (current.animatedArtwork?.available && current.animatedArtwork.videoUrl === canvasData.canvasUrl) {
           return;
         }
 
-        const effectiveCoverArt = current.coverArt || canvasData.coverArt || '';
         console.log('[App] Applying Spotify Canvas:', canvasData.canvasUrl);
-        setSong({
-          canvasUrl: canvasData.canvasUrl,
-          id: current.id || canvasData.trackId || null,
-          coverArt: effectiveCoverArt
-        });
+        setSong({ canvasUrl: canvasData.canvasUrl, id: current.id || canvasData.trackId || null, _origin: canvasData._origin });
         const artworkData = {
           available: true,
           source: 'spotify' as const,
           videoUrl: canvasData.canvasUrl,
           videoTallUrl: canvasData.canvasUrl,
-          previewUrl: effectiveCoverArt,
+          previewUrl: current.coverArt,
           artworkId: canvasData.trackId || current.id
         };
         artworkResolver.setCachedArtwork(
@@ -167,7 +209,7 @@ function App() {
             artist: current.artist,
             album: current.album,
             duration: current.duration,
-            coverArt: effectiveCoverArt,
+            coverArt: current.coverArt,
             source: current.source,
             canvasUrl: canvasData.canvasUrl
           },
@@ -178,52 +220,21 @@ function App() {
       }
     });
 
-    socket.on('animated_artwork_update', (data: {
-      source?: 'apple_music' | 'spotify';
-      videoUrl: string | null;
-      videoTallUrl?: string | null;
-      previewUrl?: string | null;
-      title?: string;
-      artist?: string;
-    }) => {
-      console.log("[App] Received async animated_artwork_update:", data);
-      if (!data || !data.videoUrl) return;
-      const current = useAppStore.getState().currentSong;
-
-      // If data carries song title/artist metadata, verify it matches current song
-      if (data.title && current.title && !isSameSong(data.title, data.artist, current.title, current.artist)) {
-        return;
-      }
-
-      // If Spotify is playing and already has Priority 1 Spotify Canvas active, do not overwrite
-      if (current.source === 'spotify' && current.animatedArtwork?.available && current.animatedArtwork?.source === 'spotify') {
-        return;
-      }
-
-      // If already playing this exact video URL, do nothing
-      if (current.animatedArtwork?.available && current.animatedArtwork.videoUrl === data.videoUrl) {
-        return;
-      }
-
-      const effectiveCoverArt = current.coverArt || data.previewUrl || '';
-      if (!current.coverArt && data.previewUrl) {
-        setSong({ coverArt: data.previewUrl });
-      }
-
-      console.log(`[App] Applying async animated artwork from ${data.source || 'apple_music'}:`, data.videoUrl);
-      const artworkData = {
-        available: true,
-        source: (data.source || 'apple_music') as 'apple_music' | 'spotify',
-        videoUrl: data.videoUrl,
-        videoTallUrl: data.videoTallUrl || data.videoUrl,
-        previewUrl: effectiveCoverArt || null,
-        artworkId: `${data.artist || current.artist}::${data.title || current.title}`
-      };
-      artworkResolver.setCachedArtwork(current, current.source, artworkData);
-      setAnimatedArtwork(artworkData);
-    });
-
     socket.on('progress_update', (progressData) => {
+      const activeSourceMode = useAppStore.getState().sourceMode;
+      const origin = progressData._origin || 'extension';
+
+      // Update source progress cache in store
+      useAppStore.getState().updateSourceProgress(origin, progressData.progress, progressData.isPlaying, progressData.duration);
+
+      const isMatchesCurrentSource =
+        (activeSourceMode === 'desktop' && origin === 'windows_media') ||
+        (activeSourceMode === 'web' && origin === 'extension');
+
+      if (!isMatchesCurrentSource) {
+        return;
+      }
+
       const current = useAppStore.getState().currentSong;
       if (!current.title || current.title === 'No song playing') {
         setIsPlaying(progressData.isPlaying);
@@ -259,15 +270,37 @@ function App() {
     };
     window.addEventListener('app:reconnect-socket', handleReconnect);
 
+    const handleSwitchSourceEvent = (e: Event) => {
+      const customEvt = e as CustomEvent<'web' | 'desktop'>;
+      const targetMode = customEvt.detail;
+      console.log("[App] Manual switch source event:", targetMode);
+      if (socket.connected) {
+        socket.emit('switch_source_mode', targetMode);
+        socket.emit('request_source_playback', targetMode);
+      }
+      window.electron?.switchSource?.(targetMode);
+    };
+    window.addEventListener('app:switch-source', handleSwitchSourceEvent);
+
+    const handleMusicCommandEvent = (e: Event) => {
+      const customEvt = e as CustomEvent<string>;
+      const command = customEvt.detail;
+      if (socket.connected) {
+        socket.emit('music_command', { action: command });
+      }
+    };
+    window.addEventListener('app:music-command', handleMusicCommandEvent);
+
     return () => {
       socket.disconnect();
       socket.off('connect');
       socket.off('disconnect');
       socket.off('song_update');
       socket.off('canvas_update');
-      socket.off('animated_artwork_update');
       socket.off('progress_update');
       window.removeEventListener('app:reconnect-socket', handleReconnect);
+      window.removeEventListener('app:switch-source', handleSwitchSourceEvent);
+      window.removeEventListener('app:music-command', handleMusicCommandEvent);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -275,7 +308,10 @@ function App() {
   // Fetch lyrics when song changes (shared between normal & animated artwork modes)
   useEffect(() => {
     if (!songTitle || songTitle === 'No song playing') {
+      lyricsAbortControllerRef.current?.abort();
+      lyricsAbortControllerRef.current = null;
       currentSongKeyRef.current = '';
+      lastFetchedSongIdRef.current = null;
       lyricsRequestIdRef.current++;
       setLyrics(null);
       setLyricsLoading(false);
@@ -285,11 +321,15 @@ function App() {
     const cleanT = cleanMetadata(songTitle) || songTitle.trim();
     const cleanA = cleanMetadata(songArtist) || songArtist.trim();
     const songKey = `${cleanT}::${cleanA}`.toLowerCase();
+    const explicitSpotifyId = cleanSpotifyId(songId) || undefined;
 
     // Check memory cache first for instant zero-flicker display
     const cached = lyricsCache.get(songKey);
     if (cached && cached.lines && cached.lines.length > 0) {
+      lyricsAbortControllerRef.current?.abort();
+      lyricsAbortControllerRef.current = null;
       currentSongKeyRef.current = songKey;
+      lastFetchedSongIdRef.current = explicitSpotifyId || null;
       setLyrics(cached);
       setLyricsLoading(false);
       return;
@@ -303,20 +343,28 @@ function App() {
       return;
     }
 
-    // If an active fetch is already in flight for this exact songKey, do not duplicate
-    if (songKey === currentSongKeyRef.current && isCurrentlyLoading) {
+    const isNewSong = songKey !== currentSongKeyRef.current;
+    const hasNewExplicitId = Boolean(explicitSpotifyId && explicitSpotifyId !== lastFetchedSongIdRef.current);
+
+    // If same song and already loading, do NOT abort unless we have a newly resolved explicit Spotify ID
+    if (!isNewSong && isCurrentlyLoading && !hasNewExplicitId) {
       return;
     }
 
-    currentSongKeyRef.current = songKey;
-    const requestId = ++lyricsRequestIdRef.current;
+    // Abort previous in-flight request only when song actually changes or when upgrading ID
+    lyricsAbortControllerRef.current?.abort();
     const controller = new AbortController();
+    lyricsAbortControllerRef.current = controller;
 
-    // Clear out previous song lyrics immediately so they don't linger while loading
-    setLyrics(null);
+    currentSongKeyRef.current = songKey;
+    lastFetchedSongIdRef.current = explicitSpotifyId || null;
+    const requestId = ++lyricsRequestIdRef.current;
+
+    // Clear out previous song lyrics immediately on genuine track change so they don't linger
+    if (isNewSong) {
+      setLyrics(null);
+    }
     setLyricsLoading(true);
-
-    const explicitSpotifyId = cleanSpotifyId(songId) || undefined;
 
     lyricsProvider
       .fetchLyrics(songTitle, songArtist, songAlbum, songDuration, explicitSpotifyId, controller.signal)
@@ -338,10 +386,6 @@ function App() {
         setLyrics(null);
         setLyricsLoading(false);
       });
-
-    return () => {
-      controller.abort();
-    };
   }, [
     songTitle,
     songArtist,
@@ -353,10 +397,52 @@ function App() {
     setLyricsLoading
   ]);
 
+  // Proactive cover art fallback: If desktop playback emits without artwork, fetch 600x600 artwork from iTunes instantly
+  useEffect(() => {
+    if (!songTitle || songTitle === 'No song playing') return;
+    const coverStr = typeof songCoverArt === 'string' ? songCoverArt : '';
+    if (coverStr && coverStr.trim().length > 0 && !coverStr.startsWith('data:image/jpeg;base64,')) {
+      return;
+    }
+
+    const cleanT = cleanMetadata(songTitle) || songTitle.trim();
+    const cleanA = cleanMetadata(songArtist) || songArtist.trim();
+    if (!cleanT && !cleanA) return;
+
+    let isCurrent = true;
+    const query = `${cleanT} ${cleanA}`.trim();
+
+    fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`, {
+      signal: AbortSignal.timeout(4000)
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!isCurrent) return;
+        const item = data?.results?.[0];
+        if (item && item.artworkUrl100) {
+          const highResCover = item.artworkUrl100.replace('100x100bb.jpg', '600x600bb.jpg');
+          const currentStore = useAppStore.getState().currentSong;
+          if (currentStore.title === songTitle) {
+            console.log(`[App] Resolved client-side cover art for "${songTitle}":`, highResCover);
+            setSong({
+              coverArt: highResCover,
+              album: currentStore.album || item.collectionName || ''
+            });
+          }
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [songTitle, songArtist, songCoverArt, setSong]);
+
   // Resolve dual-source animated artwork following exact playback provider priority
   useEffect(() => {
     if (!songTitle || songTitle === 'No song playing') {
-      artworkRequestIdRef.current++;
+      artworkAbortControllerRef.current?.abort();
+      artworkAbortControllerRef.current = null;
       lastResolvedTrackKeyRef.current = '';
       setAnimatedArtwork(null);
       return;
@@ -367,7 +453,7 @@ function App() {
     const activeArtwork = currentSongState.animatedArtwork;
 
     // IF an animated artwork is ALREADY ACTIVE and playing for this same track:
-    // DO NOT re-resolve or tear down! Preserve it!
+    // Preserve it unless Spotify now has a direct canvasUrl to upgrade Apple Music fallback
     if (
       activeArtwork?.available &&
       activeArtwork.videoUrl &&
@@ -379,12 +465,25 @@ function App() {
         songArtist
       )
     ) {
+      if (songSource === 'spotify' && activeArtwork.source !== 'spotify' && songCanvasUrl) {
+        // proceed to upgrade to Priority 1 Spotify Canvas
+      } else {
+        return;
+      }
+    }
+
+    const isNewTrack = currentKey !== lastResolvedTrackKeyRef.current;
+    const isDirectCanvasAvailable = Boolean(songCanvasUrl && typeof songCanvasUrl === 'string' && songCanvasUrl.startsWith('http'));
+
+    // If same track, and resolution is already in flight, and no direct canvasUrl newly arrived, do NOT abort the active lookup!
+    if (!isNewTrack && artworkAbortControllerRef.current && !isDirectCanvasAvailable) {
       return;
     }
 
-    lastResolvedTrackKeyRef.current = currentKey;
-    const artworkRequestId = ++artworkRequestIdRef.current;
+    artworkAbortControllerRef.current?.abort();
     const controller = new AbortController();
+    artworkAbortControllerRef.current = controller;
+    lastResolvedTrackKeyRef.current = currentKey;
 
     const trackInfo: ArtworkTrackInfo = {
       id: songId,
@@ -401,7 +500,7 @@ function App() {
     artworkResolver
       .resolveAnimatedArtwork(trackInfo, songSource, controller.signal)
       .then((artwork) => {
-        if (artworkRequestIdRef.current !== artworkRequestId || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
 
         const currentActive = useAppStore.getState().currentSong.animatedArtwork;
 
@@ -435,19 +534,16 @@ function App() {
         }
       })
       .catch((err) => {
-        if (artworkRequestIdRef.current !== artworkRequestId || controller.signal.aborted) return;
-        if (err?.name !== 'AbortError') {
+        if (err.name !== 'AbortError') {
           console.warn('[App] Animated artwork resolver error:', err);
         }
-        const currentActive = useAppStore.getState().currentSong.animatedArtwork;
-        if (!currentActive?.available || !currentActive.videoUrl) {
-          setAnimatedArtwork(null);
+        if (!controller.signal.aborted) {
+          const currentActive = useAppStore.getState().currentSong.animatedArtwork;
+          if (!currentActive?.available || !currentActive.videoUrl) {
+            setAnimatedArtwork(null);
+          }
         }
       });
-
-    return () => {
-      controller.abort();
-    };
   }, [
     songTitle,
     songArtist,
@@ -460,44 +556,6 @@ function App() {
     songVideoId,
     setAnimatedArtwork
   ]);
-
-  // Automatic fallback thumbnail resolver: guarantees coverArt is never blank regardless of player source
-  useEffect(() => {
-    if (!songTitle || songTitle === 'No song playing' || songCoverArt) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const cleanT = cleanMetadata(songTitle) || songTitle.trim();
-    const cleanA = cleanMetadata(songArtist) || songArtist.trim();
-
-    (async () => {
-      try {
-        const q = `${cleanA} ${cleanT}`.trim();
-        const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=3`, {
-          signal: controller.signal
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const first = data?.results?.[0];
-          if (first?.artworkUrl100) {
-            const highRes = first.artworkUrl100.replace('100x100bb.jpg', '1000x1000bb.jpg');
-            const cur = useAppStore.getState().currentSong;
-            if (isSameSong(cleanT, cleanA, cur.title, cur.artist) && !cur.coverArt) {
-              console.log('[App] Fallback thumbnail resolved from iTunes:', highRes);
-              setSong({ coverArt: highRes });
-            }
-          }
-        }
-      } catch {
-        // Ignore fallback errors
-      }
-    })();
-
-    return () => {
-      controller.abort();
-    };
-  }, [songTitle, songArtist, songCoverArt, setSong]);
 
   // Global macOS Keyboard Shortcuts
   useEffect(() => {
@@ -512,6 +570,7 @@ function App() {
 
       // Space: Play / Pause
       if (e.code === 'Space') {
+        if (e.repeat) return;
         e.preventDefault();
         const currentSong = useAppStore.getState().currentSong;
         if (!currentSong.title || currentSong.title === 'No song playing') {
@@ -522,32 +581,39 @@ function App() {
           useAppStore.getState().showHud(nextPlaying ? 'Playing' : 'Paused');
         }
         window.electron?.musicCommand('play-pause');
+        window.dispatchEvent(new CustomEvent('app:music-command', { detail: 'play-pause' }));
         return;
       }
 
       // ⌘ + ArrowLeft: Previous Track
       if (isCmdOrCtrl && e.key === 'ArrowLeft') {
+        if (e.repeat) return;
         e.preventDefault();
         const currentSong = useAppStore.getState().currentSong;
         if (!currentSong.title || currentSong.title === 'No song playing') {
           useAppStore.getState().showHud('No song playing');
         } else {
           useAppStore.getState().showHud('Previous Track');
+          useAppStore.getState().updateProgress(0);
         }
         window.electron?.musicCommand('previous');
+        window.dispatchEvent(new CustomEvent('app:music-command', { detail: 'previous' }));
         return;
       }
 
       // ⌘ + ArrowRight: Next Track
       if (isCmdOrCtrl && e.key === 'ArrowRight') {
+        if (e.repeat) return;
         e.preventDefault();
         const currentSong = useAppStore.getState().currentSong;
         if (!currentSong.title || currentSong.title === 'No song playing') {
           useAppStore.getState().showHud('No song playing');
         } else {
           useAppStore.getState().showHud('Next Track');
+          useAppStore.getState().updateProgress(0);
         }
         window.electron?.musicCommand('next');
+        window.dispatchEvent(new CustomEvent('app:music-command', { detail: 'next' }));
         return;
       }
 
@@ -625,11 +691,11 @@ function App() {
         return;
       }
 
-      // \ : Reset sync offset (600ms calibrated default)
+      // \ : Reset sync offset (0ms)
       if (e.key === '\\' || (isCmdOrCtrl && e.key === '\\')) {
         e.preventDefault();
-        useAppStore.getState().setSyncOffsetMs(600);
-        useAppStore.getState().showHud('Sync Offset: 600ms (Default)');
+        useAppStore.getState().setSyncOffsetMs(0);
+        useAppStore.getState().showHud('Sync Offset: 0ms (Reset)');
         return;
       }
     };

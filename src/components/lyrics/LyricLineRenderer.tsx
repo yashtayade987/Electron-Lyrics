@@ -64,25 +64,18 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
         );
     }
 
-    const displayText = line.words || line.text || '';
-    const hasExistingParens = /^\s*\(.*?\)\s*$/.test(displayText);
+    const rawText = line.words || line.text || '';
+    const hasExistingParens = /[()]/.test(rawText);
     const isBackgroundLine = Boolean(line.isBackground || hasExistingParens);
+    const displayText = isBackgroundLine ? rawText.replace(/[()]/g, '').trim() : rawText;
 
     const lineClasses = [
         'lyric-line',
-        isActive ? 'active-line' : '',
-        isPast ? 'passed-line' : '',
+        isActive ? 'active-line Active' : 'NotSung',
+        isPast ? 'passed-line Sung' : '',
         line.isOppositeAligned ? 'opposite-aligned' : '',
         isBackgroundLine ? 'bg-line' : ''
     ].filter(Boolean).join(' ');
-
-    const hasSyllableParens = Boolean(
-        line.syllables && line.syllables.length > 0 && (
-            line.syllables[0]?.word?.startsWith('(') ||
-            line.syllables[line.syllables.length - 1]?.word?.endsWith(')')
-        )
-    );
-    const shouldRenderParen = isBackgroundLine && !hasExistingParens && !hasSyllableParens;
 
     return (
         <div
@@ -92,13 +85,17 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
             data-end={line.endTimeMs}
         >
             <div className="words-container">
-                {shouldRenderParen && <span className="bg-paren">(</span>}
                 {line.syllables && line.syllables.length > 0 ? (
                     wordGroups.map((group, gIdx) => (
                         <span key={gIdx} className="word-group">
                             {group.map((s: Word, sIdx: number) => {
                                 const isLastInWord = sIdx === group.length - 1;
-                                const wordClass = `word${s.isPartOfWord ? ' part-of-word' : ''}${isLastInWord ? ' last-syllable-in-word' : ''}`;
+                                const isLetterGroup = Boolean(s.letters && s.letters.length > 0);
+                                const wordClass = `word${s.isPartOfWord ? ' part-of-word' : ''}${isLastInWord ? ' last-syllable-in-word' : ''}${isLetterGroup ? ' letterGroup' : ''}`;
+                                const displayWord = isBackgroundLine ? s.word.replace(/[()]/g, '').trim() : s.word;
+                                const lettersToRender = isLetterGroup && isBackgroundLine
+                                    ? s.letters!.filter((l) => l.letter !== '(' && l.letter !== ')')
+                                    : (s.letters || []);
 
                                 return (
                                     <span
@@ -107,7 +104,25 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
                                         data-start={s.startTimeMs}
                                         data-end={s.endTimeMs}
                                     >
-                                        {s.word}
+                                        {isLetterGroup ? (
+                                            lettersToRender.map((letObj, letIdx) => {
+                                                const isSpace = letObj.letter.trim().length === 0;
+                                                const isLastLetter = letIdx === lettersToRender.length - 1;
+                                                const letterClass = `letter${isSpace ? ' SpaceLetter' : ''}${isLastLetter ? ' LastLetterInWord' : ''}`;
+                                                return (
+                                                    <span
+                                                        key={letIdx}
+                                                        className={letterClass}
+                                                        data-start={letObj.startTimeMs}
+                                                        data-end={letObj.endTimeMs}
+                                                    >
+                                                        {letObj.letter}
+                                                    </span>
+                                                );
+                                            })
+                                        ) : (
+                                            displayWord
+                                        )}
                                     </span>
                                 );
                             })}
@@ -123,7 +138,6 @@ export const LyricLineRenderer = React.memo(forwardRef<HTMLDivElement, LyricLine
                         {displayText}
                     </span>
                 )}
-                {shouldRenderParen && <span className="bg-paren">)</span>}
             </div>
 
             {isRomanized && displayText !== '' && (

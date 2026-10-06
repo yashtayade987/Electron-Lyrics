@@ -8,9 +8,42 @@ let socket = io('http://localhost:4000', {
 });
 
 let lastSongId = '';
+let lastCommandTime = 0;
+let lastCommandAction = '';
+
+function triggerInstantBurstScan() {
+    const prevKey = lastSongId;
+    let scans = 0;
+    const maxScans = 40; // 40 scans * 30ms = 1.2s max duration
+    const timer = setInterval(() => {
+        scans++;
+        const data = getYouTubeMusicData();
+        if (data && data.title) {
+            const newKey = `${data.title}-${data.artist}`;
+            if (newKey !== prevKey) {
+                clearInterval(timer);
+                console.log(`[ElectronLyrics: YouTube] Fast burst detected song change in ${scans * 30}ms:`, data.title);
+                sendSongUpdate(data);
+                return;
+            }
+        }
+        if (scans >= maxScans) {
+            clearInterval(timer);
+        }
+    }, 30);
+}
 
 // Listen for music commands from the Electron app
 socket.on('music_command', (data) => {
+    if (!data?.action) return;
+    const now = Date.now();
+    if (data.action === lastCommandAction && now - lastCommandTime < 150) {
+        console.log('[ElectronLyrics] Debouncing duplicate music command:', data.action);
+        return;
+    }
+    lastCommandTime = now;
+    lastCommandAction = data.action;
+
     console.log('[ElectronLyrics] Music command received:', data.action);
 
     const clickButton = (selectors) => {
@@ -24,9 +57,10 @@ socket.on('music_command', (data) => {
                 btn.dispatchEvent(new MouseEvent('mousedown', eventOptions));
                 btn.dispatchEvent(new PointerEvent('pointerup', eventOptions));
                 btn.dispatchEvent(new MouseEvent('mouseup', eventOptions));
-                btn.dispatchEvent(new MouseEvent('click', eventOptions));
                 if (typeof btn.click === 'function') {
                     btn.click();
+                } else {
+                    btn.dispatchEvent(new MouseEvent('click', eventOptions));
                 }
                 return true;
             }
@@ -43,6 +77,7 @@ socket.on('music_command', (data) => {
                 'tp-yt-paper-icon-button.previous-button',
                 '.player-controls-top button[aria-label="Previous"]',
             ]);
+            triggerInstantBurstScan();
             break;
         case 'play-pause':
             clickButton([
@@ -59,6 +94,7 @@ socket.on('music_command', (data) => {
                 'tp-yt-paper-icon-button.next-button',
                 '.player-controls-top button[aria-label="Next"]',
             ]);
+            triggerInstantBurstScan();
             break;
     }
 });
@@ -148,9 +184,16 @@ function getYouTubeMusicData() {
     };
 }
 
+let lastEmittedAlbum = '';
+let lastEmittedCover = '';
+let lastEmittedDuration = 0;
+
 function sendSongUpdate(data) {
     if (!data.title) return;
     lastSongId = `${data.title}-${data.artist}`;
+    lastEmittedAlbum = data.album || '';
+    lastEmittedCover = data.coverArt || '';
+    lastEmittedDuration = data.duration || 0;
     console.log("[ElectronLyrics] New Song:", data.title, "by", data.artist);
     socket.emit('song_update', data);
 }
@@ -171,7 +214,12 @@ function checkAndUpdate() {
     const data = getYouTubeMusicData();
     if (!data.title) return;
     const songId = `${data.title}-${data.artist}`;
-    if (songId !== lastSongId) {
+    const isNewSong = songId !== lastSongId;
+    const isNewAlbum = Boolean(data.album && !lastEmittedAlbum);
+    const isNewCover = Boolean(data.coverArt && data.coverArt !== lastEmittedCover);
+    const isNewDuration = Boolean(data.duration && !lastEmittedDuration);
+
+    if (isNewSong || isNewAlbum || isNewCover || isNewDuration) {
         sendSongUpdate(data);
     } else {
         sendProgressUpdate(data);
@@ -187,8 +235,15 @@ socket.on('connect', () => {
     }
 });
 
-// Periodic status poll
-setInterval(checkAndUpdate, 300);
+socket.on('request_current_song', () => {
+    const data = getYouTubeMusicData();
+    if (data.title) {
+        sendSongUpdate(data);
+    }
+});
+
+// Periodic status poll (150ms for ultra-fast reaction)
+setInterval(checkAndUpdate, 150);
 
 // Fast reaction using MutationObserver on the player bar
 const observer = new MutationObserver(() => {
@@ -198,10 +253,16 @@ const observer = new MutationObserver(() => {
 function initObserver() {
     const target = document.querySelector('ytmusic-player-bar, body');
     if (target) {
-        observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-valuenow', 'aria-label', 'title', 'src'] });
-        console.log('[ElectronLyrics] MutationObserver attached to YouTube Music player');
+        observer.observe(target, { 
+            childList: true, 
+            subtree: true, 
+            characterData: true,
+            attributes: true, 
+            attributeFilter: ['aria-valuenow', 'aria-label', 'title', 'src', 'href'] 
+        });
+        console.log('[ElectronLyrics] Fast MutationObserver attached to YouTube Music player');
     } else {
-        setTimeout(initObserver, 1500);
+        setTimeout(initObserver, 1000);
     }
 }
 initObserver();

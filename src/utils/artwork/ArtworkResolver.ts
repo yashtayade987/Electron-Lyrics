@@ -97,8 +97,9 @@ export const artworkResolver = {
         // 1. Check in-memory LRU Cache (capped at 10 items)
         const cached = getLruCache(cacheKey);
         if (cached && Date.now() < cached.expiresAt) {
+            const hasNewIdentifiers = !cached.data.available && (Boolean(track.canvasUrl) || Boolean(track.id));
             const isSpotifyUpgradeAvailable = playbackProvider === 'spotify' && cached.data.source === 'apple_music' && track.canvasUrl;
-            if (!isSpotifyUpgradeAvailable && (cached.data.available || !track.canvasUrl)) {
+            if (!hasNewIdentifiers && !isSpotifyUpgradeAvailable && (cached.data.available || !track.canvasUrl)) {
                 return cached.data;
             }
         }
@@ -191,12 +192,14 @@ export const artworkResolver = {
                     }
                 }
 
-                // Cache resolution outcome into 10-item LRU
-                const ttl = result.available ? TTL_VALID_MS : TTL_EMPTY_MS;
-                setLruCache(cacheKey, {
-                    data: result,
-                    expiresAt: Date.now() + ttl
-                });
+                // Cache resolution outcome into 10-item LRU ONLY if not aborted
+                if (!signal?.aborted) {
+                    const ttl = result.available ? TTL_VALID_MS : TTL_EMPTY_MS;
+                    setLruCache(cacheKey, {
+                        data: result,
+                        expiresAt: Date.now() + ttl
+                    });
+                }
 
                 return result;
             } finally {
@@ -230,49 +233,37 @@ export const artworkResolver = {
             return cached.data;
         }
 
-        if (inflightRequests.has(specificCacheKey)) {
-            return inflightRequests.get(specificCacheKey)!;
-        }
-
-        const executeSpecificResolution = async (): Promise<AnimatedArtworkData> => {
-            try {
-                let result: AnimatedArtworkData = EMPTY_ARTWORK;
-                if (targetSource === 'spotify') {
-                    if (track.canvasUrl && typeof track.canvasUrl === 'string' && track.canvasUrl.startsWith('http')) {
-                        result = {
-                            source: 'spotify',
-                            available: true,
-                            videoUrl: track.canvasUrl,
-                            videoTallUrl: track.canvasUrl,
-                            previewUrl: track.coverArt || null,
-                            artworkId: track.id || `${track.artist}::${track.title}`
-                        };
-                    } else {
-                        result = await spotifyArtworkProvider.fetchArtwork(track, signal);
-                    }
-                } else if (targetSource === 'apple_music') {
-                    result = await appleMusicArtworkProvider.fetchArtwork(track, signal);
+        try {
+            let result: AnimatedArtworkData = EMPTY_ARTWORK;
+            if (targetSource === 'spotify') {
+                if (track.canvasUrl && typeof track.canvasUrl === 'string' && track.canvasUrl.startsWith('http')) {
+                    result = {
+                        source: 'spotify',
+                        available: true,
+                        videoUrl: track.canvasUrl,
+                        videoTallUrl: track.canvasUrl,
+                        previewUrl: track.coverArt || null,
+                        artworkId: track.id || `${track.artist}::${track.title}`
+                    };
+                } else {
+                    result = await spotifyArtworkProvider.fetchArtwork(track, signal);
                 }
-
-                if (result && result.available) {
-                    setLruCache(specificCacheKey, {
-                        data: result,
-                        expiresAt: Date.now() + TTL_VALID_MS
-                    });
-                }
-
-                return result;
-            } catch (err) {
-                console.warn(`[ArtworkResolver] Failed to resolve specific source ${targetSource}:`, err);
-                return EMPTY_ARTWORK;
-            } finally {
-                inflightRequests.delete(specificCacheKey);
+            } else if (targetSource === 'apple_music') {
+                result = await appleMusicArtworkProvider.fetchArtwork(track, signal);
             }
-        };
 
-        const resPromise = executeSpecificResolution();
-        inflightRequests.set(specificCacheKey, resPromise);
-        return resPromise;
+            if (result && result.available) {
+                setLruCache(specificCacheKey, {
+                    data: result,
+                    expiresAt: Date.now() + TTL_VALID_MS
+                });
+            }
+
+            return result;
+        } catch (err) {
+            console.warn(`[ArtworkResolver] Failed to resolve specific source ${targetSource}:`, err);
+            return EMPTY_ARTWORK;
+        }
     },
 
     /**

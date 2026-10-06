@@ -1,5 +1,5 @@
-import { Pin, Sparkles, Moon, Sun } from 'lucide-react';
-import { useState } from 'react';
+import { Pin, Sparkles, Moon, Sun, Globe, Monitor, Check } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import './WindowControls.css';
 
@@ -44,7 +44,19 @@ interface WindowControlsProps {
 
 export const WindowControls: React.FC<WindowControlsProps> = ({ isAnimatedArtworkActive }) => {
     const [isPinned, setIsPinned] = useState(true);
-    const { theme, setTheme, isConnected, showHud, currentSong, artworkPreference, manualArtworkOverride } = useAppStore();
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const {
+        theme,
+        setTheme,
+        isConnected,
+        showHud,
+        currentSong,
+        artworkPreference,
+        manualArtworkOverride,
+        sourceMode,
+        setSourceMode
+    } = useAppStore();
 
     const hasAnimatedArtwork = Boolean(
         currentSong.animatedArtwork?.available && currentSong.animatedArtwork?.videoUrl
@@ -116,65 +128,130 @@ export const WindowControls: React.FC<WindowControlsProps> = ({ isAnimatedArtwor
         showHud(`${nextTheme.charAt(0).toUpperCase() + nextTheme.slice(1)} Mode`);
     };
 
-    const handleServiceClick = (e: React.MouseEvent | React.PointerEvent) => {
+    useEffect(() => {
+        if (!isMenuOpen) return;
+
+        const handlePointerDownOutside = (e: MouseEvent | PointerEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                setIsMenuOpen(false);
+            }
+        };
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setIsMenuOpen(false);
+            }
+        };
+
+        window.addEventListener('pointerdown', handlePointerDownOutside);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => {
+            window.removeEventListener('pointerdown', handlePointerDownOutside);
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isMenuOpen]);
+
+    const handleToggleMenu = (e: React.MouseEvent | React.PointerEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        console.log('[WindowControls] Music Service logo clicked');
-        window.dispatchEvent(new CustomEvent('app:reconnect-socket'));
+        setIsMenuOpen((prev) => !prev);
+    };
 
-        const serviceName = currentSong.source === 'spotify'
-            ? 'Spotify'
-            : currentSong.source === 'apple'
-            ? 'Apple Music'
-            : 'YouTube Music';
+    const handleSelectSource = (mode: 'web' | 'desktop', e: React.MouseEvent | React.PointerEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsMenuOpen(false);
 
-        if (isConnected) {
-            showHud(`Connected: ${serviceName}`);
-        } else {
-            showHud(`Waiting for ${serviceName} / Reconnecting Bridge...`);
+        if (sourceMode === mode) {
+            showHud(`${mode === 'desktop' ? 'Desktop App' : 'Web Player'} (Re-fetching...)`);
+            window.dispatchEvent(new CustomEvent('app:switch-source', { detail: mode }));
+            return;
         }
+
+        setSourceMode(mode);
+        showHud(`Source: ${mode === 'desktop' ? 'Desktop App' : 'Web Player'}`);
+        window.dispatchEvent(new CustomEvent('app:switch-source', { detail: mode }));
     };
 
     const ThemeIcon = theme === 'dynamic' ? Sparkles : theme === 'dark' ? Moon : Sun;
     const themeTitle = `Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)} (⌘T)`;
 
-    // Select logo based on active song source
-    const activeSource = currentSong.source || 'youtube';
-    const serviceName = activeSource === 'spotify'
-        ? 'Spotify'
-        : activeSource === 'apple'
-        ? 'Apple Music'
-        : 'YouTube Music';
-
-    const serviceTitle = isConnected
-        ? `${serviceName} Connected`
-        : `${serviceName} Offline (Click to reconnect)`;
+    // Select logo based on active song source or source mode
+    const activeSource = currentSong.source || (sourceMode === 'desktop' ? 'spotify' : 'youtube');
+    const currentSourceName = sourceMode === 'desktop' ? 'Desktop App' : 'Web Player';
+    const buttonTitle = `${currentSourceName} (Click to switch source)`;
 
     return (
         <header className="mac-titlebar" role="toolbar" aria-label="Window Controls">
-            {/* LEFT SIDE: Service Logo and Theme Button (clean, no surrounding pill) */}
+            {/* LEFT SIDE: Service Logo with Source Selection Menu & Theme Button */}
             <div
                 className="titlebar-actions-group titlebar-left-controls"
                 role="group"
                 aria-label="Quick Actions"
                 onPointerDown={(e) => e.stopPropagation()}
             >
-                <button
-                    className={`titlebar-icon-btn service-logo-btn ${isConnected ? 'connected' : 'disconnected'}`}
-                    onClick={handleServiceClick}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    title={serviceTitle}
-                    aria-label={serviceTitle}
-                >
-                    {activeSource === 'spotify' ? (
-                        <SpotifyLogo size={20} />
-                    ) : activeSource === 'apple' ? (
-                        <AppleMusicLogo size={20} />
-                    ) : (
-                        <YouTubeMusicLogo size={20} />
+                <div className="source-menu-wrapper" ref={menuRef}>
+                    <button
+                        className={`titlebar-icon-btn service-logo-btn ${isConnected ? 'connected' : 'disconnected'} ${isMenuOpen ? 'menu-active' : ''}`}
+                        onClick={handleToggleMenu}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        title={buttonTitle}
+                        aria-label={buttonTitle}
+                        aria-expanded={isMenuOpen}
+                        aria-haspopup="menu"
+                    >
+                        {activeSource === 'spotify' ? (
+                            <SpotifyLogo size={20} />
+                        ) : activeSource === 'apple' ? (
+                            <AppleMusicLogo size={20} />
+                        ) : (
+                            <YouTubeMusicLogo size={20} />
+                        )}
+                        {!isConnected && <span className="service-offline-badge" title="Offline" />}
+                    </button>
+
+                    {isMenuOpen && (
+                        <div
+                            className="source-menu-popover"
+                            role="menu"
+                            aria-label="Audio Source Options"
+                            onPointerDown={(e) => e.stopPropagation()}
+                        >
+                            <div className="source-menu-header">Audio Source</div>
+                            <button
+                                className={`source-menu-item ${sourceMode === 'web' ? 'active' : ''}`}
+                                onClick={(e) => handleSelectSource('web', e)}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                role="menuitem"
+                            >
+                                <div className="source-item-info">
+                                    <Globe size={13} className="source-item-icon" />
+                                    <div className="source-item-text">
+                                        <span className="source-item-title">Web Player</span>
+                                        <span className="source-item-desc">Browser Extension</span>
+                                    </div>
+                                </div>
+                                {sourceMode === 'web' && <Check size={13} className="source-item-check" />}
+                            </button>
+
+                            <button
+                                className={`source-menu-item ${sourceMode === 'desktop' ? 'active' : ''}`}
+                                onClick={(e) => handleSelectSource('desktop', e)}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                role="menuitem"
+                            >
+                                <div className="source-item-info">
+                                    <Monitor size={13} className="source-item-icon" />
+                                    <div className="source-item-text">
+                                        <span className="source-item-title">Desktop App</span>
+                                        <span className="source-item-desc">Spotify / Apple Music</span>
+                                    </div>
+                                </div>
+                                {sourceMode === 'desktop' && <Check size={13} className="source-item-check" />}
+                            </button>
+                        </div>
                     )}
-                    {!isConnected && <span className="service-offline-badge" title="Offline" />}
-                </button>
+                </div>
 
                 {!isAnimated && (
                     <button

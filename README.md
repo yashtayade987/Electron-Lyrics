@@ -1,73 +1,57 @@
-# React + TypeScript + Vite
+# Beautiful Lyrics 🎵
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An Apple Music & macOS-inspired floating synchronized lyrics and live animated artwork desktop companion.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Real-Time Word-Synced Lyrics**: Syllable-by-syllable and word-by-word karaoke highlighting powered by Spicy Lyrics.
+- **Instrumental Break Visualization**: Apple Music-style dynamic 3-dot interlude animations (`♪`).
+- **Dual-Source Animated Artwork**:
+  - **Spotify Canvas**: High-definition looping video canvases direct from Spotify.
+  - **Apple Music Motion**: Official motion album artwork via Apple HLS (`.m3u8`) streaming.
+  - Hardware-accelerated 2D Skia Canvas compositing eliminating transparent window occlusions.
+- **System-Wide Desktop Music Detection**:
+  - Native Windows SMTC / GSMTC background listener supporting Spotify Desktop, Apple Music for Windows, iTunes, Tidal, and Amazon Music.
+  - Dual-source fallback with the included Chromium browser extension for web players (Spotify Web, YouTube Music, Apple Music Web).
+- **macOS Liquid Glass UI**:
+  - Glassmorphic translucency, SF Pro typography, dynamic/dark/light themes, custom traffic lights, and on-screen HUD notifications.
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Desktop Framework**: Electron 40
+- **Frontend**: React 19, TypeScript, Vite 7
+- **Styling**: Apple HIG Glassmorphic CSS Design System
+- **State Management**: Zustand
+- **Real-Time Bridge**: Socket.io / Native Windows SMTC (PowerShell + C# P/Invoke)
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Prerequisites
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Node.js (v18+ recommended)
+- Windows 10/11 (for native SMTC listener)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Development
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Install dependencies
+npm install
+
+# Start Vite dev server and Electron desktop app concurrently
+npm run electron:dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Alternatively, double-click `launch-lyrics.bat` to launch the app.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Keyboard Shortcuts
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- `Space`: Play / Pause
+- `⌘` / `Ctrl` + `←`: Previous Track
+- `⌘` / `Ctrl` + `→`: Next Track
+- `⌘` / `Ctrl` + `P`: Toggle Pin (Always on Top)
+- `⌘` / `Ctrl` + `T`: Toggle Theme (Dynamic / Dark / Light)
+- `[`: Delay lyrics (-50ms offset)
+- `]`: Advance lyrics (+50ms offset)
+- `\`: Reset lyrics offset (0ms)
+- `⌘` / `Ctrl` + `M`: Minimize Window
+- `⌘` / `Ctrl` + `W`: Close Window

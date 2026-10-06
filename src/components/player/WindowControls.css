@@ -101,6 +101,161 @@ body.theme-light .titlebar-icon-btn:hover {
     box-shadow: 0 0 4px rgba(255, 159, 10, 0.8);
 }
 
+/* Source Selection Popover Menu */
+.source-menu-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.service-logo-btn.menu-active {
+    background: rgba(255, 255, 255, 0.16);
+    transform: scale(1.04);
+}
+
+.source-menu-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: -2px;
+    min-width: 175px;
+    background: rgba(28, 28, 32, 0.92);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 5px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 1px rgba(255, 255, 255, 0.2);
+    z-index: 1000;
+    pointer-events: auto !important;
+    -webkit-app-region: no-drag !important;
+    user-select: none;
+    animation: sourceMenuFadeIn 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: top left;
+}
+
+@keyframes sourceMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.source-menu-header {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: rgba(255, 255, 255, 0.45);
+    padding: 5px 8px 3px 8px;
+    user-select: none;
+    -webkit-app-region: no-drag !important;
+}
+
+.source-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    -webkit-app-region: no-drag !important;
+    transition: background 0.12s ease, color 0.12s ease;
+    text-align: left;
+    outline: none;
+}
+
+.source-menu-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+.source-menu-item.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.source-item-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.source-item-icon {
+    color: rgba(255, 255, 255, 0.7);
+    flex-shrink: 0;
+}
+
+.source-menu-item:hover .source-item-icon,
+.source-menu-item.active .source-item-icon {
+    color: #ffffff;
+}
+
+.source-item-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.source-item-title {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.25;
+}
+
+.source-item-desc {
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.2;
+    margin-top: 1px;
+}
+
+.source-item-check {
+    color: #30d158;
+    flex-shrink: 0;
+    margin-left: 6px;
+}
+
+/* Light Mode Overrides */
+body.theme-light .source-menu-popover {
+    background: rgba(246, 246, 248, 0.94);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+body.theme-light .source-menu-header {
+    color: rgba(0, 0, 0, 0.45);
+}
+
+body.theme-light .source-menu-item {
+    color: rgba(0, 0, 0, 0.88);
+}
+
+body.theme-light .source-menu-item:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #000000;
+}
+
+body.theme-light .source-menu-item.active {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+body.theme-light .source-item-icon {
+    color: rgba(0, 0, 0, 0.6);
+}
+
+body.theme-light .source-item-desc {
+    color: rgba(0, 0, 0, 0.45);
+}
+
 /* Right Side: Authentic macOS Traffic Lights */
 .traffic-lights-group {
     display: flex;
